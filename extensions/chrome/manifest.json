@@ -17,6 +17,11 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "icons": {
+    "16": "icon-on.png",
+    "48": "icon-on.png",
+    "128": "icon-on.png"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Smartwriter MCP - Connect tab for automation",

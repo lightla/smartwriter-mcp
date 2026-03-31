@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import net from 'net';
 import { execSync } from 'child_process';
 
-const DEFAULT_PORT = 9023;
+const DEFAULT_PORT = 9223;
 
 type CliOptions = {
   port?: number;

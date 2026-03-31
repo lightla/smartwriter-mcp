@@ -17,8 +17,25 @@ function getWsStatus(): 'connected' | 'connecting' | 'waiting' {
 
 async function loadConfig(): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['smartwriterPort'], (result) => {
+    chrome.storage.local.get(['smartwriterPort', 'smartwriterTabId'], async (result) => {
       configuredPort = result.smartwriterPort || DEFAULT_PORT;
+
+      const savedTabId = result.smartwriterTabId as number | undefined;
+      if (savedTabId) {
+        // Verify the tab still exists before restoring
+        try {
+          await new Promise<void>((res, rej) => {
+            chrome.tabs.get(savedTabId, (tab) => {
+              if (chrome.runtime.lastError || !tab) rej();
+              else res();
+            });
+          });
+          currentTabId = savedTabId;
+        } catch {
+          chrome.storage.local.remove('smartwriterTabId');
+        }
+      }
+
       resolve();
     });
   });
@@ -204,6 +221,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     });
   } else if (request.type === 'CONNECT_TAB') {
     currentTabId = request.tabId;
+    if (currentTabId) {
+      chrome.storage.local.set({ smartwriterTabId: currentTabId });
+    } else {
+      chrome.storage.local.remove('smartwriterTabId');
+    }
     sendTabsUpdate();
     sendResponse({ success: true });
   } else if (request.type === 'SET_PORT') {
@@ -221,7 +243,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 chrome.tabs.onActivated.addListener(() => sendTabsUpdate());
 chrome.tabs.onUpdated.addListener(() => sendTabsUpdate());
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId === currentTabId) currentTabId = null;
+  if (tabId === currentTabId) {
+    currentTabId = null;
+    chrome.storage.local.remove('smartwriterTabId');
+  }
   sendTabsUpdate();
 });
 

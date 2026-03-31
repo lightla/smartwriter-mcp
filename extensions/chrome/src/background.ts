@@ -229,7 +229,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
               boxShadow: '0 0 8px rgba(99,102,241,0.6)',
               pointerEvents: 'none', zIndex: '2147483647',
               transform: 'translate(-50%,-50%)',
-              transition: 'left 0.2s cubic-bezier(.4,0,.2,1), top 0.2s cubic-bezier(.4,0,.2,1)',
+              transition: 'left 0.1s ease, top 0.1s ease',
             });
             document.body.appendChild(dot);
             dot.style.left = ${pos.x} + 'px';
@@ -245,7 +245,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
     );
 
     // Wait for animation
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 100));
 
     if (command === 'CLICK') {
       // Pulse animation on click
@@ -267,7 +267,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
           returnByValue: false,
         }, cb)
       );
-      await new Promise((r) => setTimeout(r, 80));
+      await new Promise((r) => setTimeout(r, 30));
       await withCallback<void>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );

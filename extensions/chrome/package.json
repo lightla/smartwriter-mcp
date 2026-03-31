@@ -12,9 +12,9 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --minify && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json",
-    "build:dev": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --sourcemap && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json",
-    "watch": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --watch --sourcemap && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json",
+    "build": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --minify && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
+    "build:dev": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --sourcemap && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
+    "watch": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --watch --sourcemap && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

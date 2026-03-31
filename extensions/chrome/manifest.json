@@ -7,7 +7,8 @@
     "debugger",
     "scripting",
     "tabs",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -18,7 +19,8 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Smartwriter MCP - Connect tab for automation"
+    "default_title": "Smartwriter MCP - Connect tab for automation",
+    "default_icon": "icon-off.png"
   },
   "content_scripts": [
     {

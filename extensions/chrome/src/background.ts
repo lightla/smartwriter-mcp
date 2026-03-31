@@ -41,6 +41,42 @@ async function loadConfig(): Promise<void> {
   });
 }
 
+const iconCache = new Map<string, ImageData>();
+
+async function loadIconImageData(filename: string): Promise<Record<number, ImageData>> {
+  const cacheKey = filename;
+  if (iconCache.has(cacheKey)) return iconCache.get(cacheKey) as unknown as Record<number, ImageData>;
+  const url = chrome.runtime.getURL(filename);
+  const resp = await fetch(url);
+  const blob = await resp.blob();
+  const bitmap = await createImageBitmap(blob);
+  const sizes = [16, 32, 48, 128];
+  const result: Record<number, ImageData> = {};
+  for (const size of sizes) {
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    result[size] = ctx.getImageData(0, 0, size, size);
+  }
+  iconCache.set(cacheKey, result as unknown as ImageData);
+  return result;
+}
+
+function updateIcon(): void {
+  const fullyConnected =
+    mcpSocket !== null &&
+    mcpSocket.readyState === WebSocket.OPEN &&
+    currentTabId !== null;
+  setIcon(fullyConnected);
+}
+
+function setIcon(connected: boolean): void {
+  const file = connected ? 'icon-on.png' : 'icon-off.png';
+  loadIconImageData(file).then((imageDataMap) => {
+    chrome.action.setIcon({ imageData: imageDataMap as unknown as ImageData });
+  }).catch(() => {});
+}
+
 function connectToMcp(): void {
   if (mcpSocket && mcpSocket.readyState !== WebSocket.CLOSED) return;
 
@@ -51,6 +87,7 @@ function connectToMcp(): void {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    updateIcon();
     sendTabsUpdate();
   };
 
@@ -76,11 +113,13 @@ function connectToMcp(): void {
 
   mcpSocket.onerror = () => {
     mcpSocket = null;
+    updateIcon();
     scheduleReconnect();
   };
 
   mcpSocket.onclose = () => {
     mcpSocket = null;
+    updateIcon();
     scheduleReconnect();
   };
 }
@@ -224,6 +263,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     } else {
       chrome.storage.local.remove('smartwriterTabId');
     }
+    updateIcon();
     sendTabsUpdate();
     sendResponse({ success: true });
   } else if (request.type === 'SET_PORT') {
@@ -244,8 +284,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === currentTabId) {
     currentTabId = null;
     chrome.storage.local.remove('smartwriterTabId');
+    updateIcon();
   }
   sendTabsUpdate();
 });
 
+// Keep service worker alive and reconnect WebSocket every 25s
+chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'keepalive') connectToMcp();
+});
+
+setIcon(false);
 loadConfig().then(() => connectToMcp());

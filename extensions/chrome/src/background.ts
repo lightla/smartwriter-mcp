@@ -182,9 +182,21 @@ async function evaluateWithDebugger(tabId: number, script: string, args?: unknow
   }
 }
 
+let attachedDebuggerTabId: number | null = null;
+
+async function ensureDebuggerAttached(tabId: number): Promise<void> {
+  if (attachedDebuggerTabId === tabId) return;
+  if (attachedDebuggerTabId !== null) {
+    await withCallback<void>((cb) => chrome.debugger.detach({ tabId: attachedDebuggerTabId! }, cb)).catch(() => {});
+    attachedDebuggerTabId = null;
+  }
+  await withCallback<void>((cb) => chrome.debugger.attach({ tabId }, '1.3', cb));
+  attachedDebuggerTabId = tabId;
+}
+
 async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: string): Promise<unknown> {
   const target = { tabId };
-  await withCallback<void>((cb) => chrome.debugger.attach(target, '1.3', cb));
+  await ensureDebuggerAttached(tabId);
   try {
     // Get element center + scroll into view
     const posResult = await withCallback<chrome.debugger.EvaluateResult>((cb) =>
@@ -217,7 +229,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
               boxShadow: '0 0 8px rgba(99,102,241,0.6)',
               pointerEvents: 'none', zIndex: '2147483647',
               transform: 'translate(-50%,-50%)',
-              transition: 'left 0.35s cubic-bezier(.4,0,.2,1), top 0.35s cubic-bezier(.4,0,.2,1)',
+              transition: 'left 0.2s cubic-bezier(.4,0,.2,1), top 0.2s cubic-bezier(.4,0,.2,1)',
             });
             document.body.appendChild(dot);
             dot.style.left = ${pos.x} + 'px';
@@ -233,7 +245,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
     );
 
     // Wait for animation
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 200));
 
     if (command === 'CLICK') {
       // Pulse animation on click
@@ -266,8 +278,10 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
     }
 
     return { hovered: true, selector, x: pos.x, y: pos.y };
-  } finally {
+  } catch (e) {
+    attachedDebuggerTabId = null;
     await withCallback<void>((cb) => chrome.debugger.detach(target, cb)).catch(() => {});
+    throw e;
   }
 }
 

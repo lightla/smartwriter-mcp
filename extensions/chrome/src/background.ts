@@ -212,8 +212,6 @@ function sendTabsUpdate(): void {
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === 'GET_STATUS') {
-    // Lazy connect: trigger connection attempt when popup opens
-    connectToMcp();
     sendResponse({
       wsStatus: getWsStatus(),
       currentTabId,
@@ -250,5 +248,4 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   sendTabsUpdate();
 });
 
-// Connect only when popup requests status (lazy connect - avoids ERR_CONNECTION_REFUSED spam)
-loadConfig();
+loadConfig().then(() => connectToMcp());

@@ -182,6 +182,95 @@ async function evaluateWithDebugger(tabId: number, script: string, args?: unknow
   }
 }
 
+async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: string): Promise<unknown> {
+  const target = { tabId };
+  await withCallback<void>((cb) => chrome.debugger.attach(target, '1.3', cb));
+  try {
+    // Get element center + scroll into view
+    const posResult = await withCallback<chrome.debugger.EvaluateResult>((cb) =>
+      chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+        expression: `(() => {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return null;
+          el.scrollIntoView({ behavior: 'instant', block: 'center' });
+          const r = el.getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+        })()`,
+        returnByValue: true,
+      }, cb)
+    );
+    const pos = posResult.result?.value as { x: number; y: number } | null;
+    if (!pos) throw new Error(`Element not found: ${selector}`);
+
+    // Animate dot from previous position to target
+    await withCallback<chrome.debugger.EvaluateResult>((cb) =>
+      chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+        expression: `(() => {
+          const DOT_ID = '__sw_cursor__';
+          let dot = document.getElementById(DOT_ID);
+          if (!dot) {
+            dot = document.createElement('div');
+            dot.id = DOT_ID;
+            Object.assign(dot.style, {
+              position: 'fixed', width: '20px', height: '20px', borderRadius: '50%',
+              background: 'rgba(99,102,241,0.85)', border: '2px solid white',
+              boxShadow: '0 0 8px rgba(99,102,241,0.6)',
+              pointerEvents: 'none', zIndex: '2147483647',
+              transform: 'translate(-50%,-50%)',
+              transition: 'left 0.35s cubic-bezier(.4,0,.2,1), top 0.35s cubic-bezier(.4,0,.2,1)',
+            });
+            document.body.appendChild(dot);
+            dot.style.left = ${pos.x} + 'px';
+            dot.style.top = ${pos.y} + 'px';
+          }
+          requestAnimationFrame(() => {
+            dot.style.left = ${pos.x} + 'px';
+            dot.style.top = ${pos.y} + 'px';
+          });
+        })()`,
+        returnByValue: false,
+      }, cb)
+    );
+
+    // Wait for animation
+    await new Promise((r) => setTimeout(r, 400));
+
+    if (command === 'CLICK') {
+      // Pulse animation on click
+      await withCallback<chrome.debugger.EvaluateResult>((cb) =>
+        chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+          expression: `(() => {
+            const dot = document.getElementById('__sw_cursor__');
+            if (dot) {
+              dot.style.transition = 'transform 0.1s ease, opacity 0.1s ease';
+              dot.style.transform = 'translate(-50%,-50%) scale(1.8)';
+              dot.style.opacity = '0.5';
+              setTimeout(() => {
+                dot.style.transform = 'translate(-50%,-50%) scale(1)';
+                dot.style.opacity = '1';
+                dot.style.transition = 'left 0.35s cubic-bezier(.4,0,.2,1), top 0.35s cubic-bezier(.4,0,.2,1), transform 0.15s ease, opacity 0.15s ease';
+              }, 150);
+            }
+          })()`,
+          returnByValue: false,
+        }, cb)
+      );
+      await new Promise((r) => setTimeout(r, 80));
+      await withCallback<void>((cb) =>
+        chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
+      );
+      await withCallback<void>((cb) =>
+        chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
+      );
+      return { clicked: true, selector, x: pos.x, y: pos.y };
+    }
+
+    return { hovered: true, selector, x: pos.x, y: pos.y };
+  } finally {
+    await withCallback<void>((cb) => chrome.debugger.detach(target, cb)).catch(() => {});
+  }
+}
+
 async function handleCommand(message: McpCommand): Promise<unknown> {
   const { command, args } = message;
 
@@ -209,6 +298,10 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
 
   if (command === 'EVALUATE') {
     return evaluateWithDebugger(currentTabId, String(args.script ?? ''), args.args as unknown[] | undefined);
+  }
+
+  if (command === 'HOVER' || command === 'CLICK') {
+    return mouseAction(currentTabId, command, String(args.selector ?? ''));
   }
 
   return new Promise((resolve, reject) => {

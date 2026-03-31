@@ -5,6 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import net from 'net';
+import { execSync } from 'child_process';
 
 const DEFAULT_PORT = 9023;
 
@@ -72,6 +73,7 @@ async function findFreePort(startPort: number, attempts = 200): Promise<number |
   return null;
 }
 
+let currentPort = DEFAULT_PORT;
 let extensionWs: WebSocket | null = null;
 const pendingRequests = new Map<
   string,
@@ -280,6 +282,16 @@ const TOOLS = [
     description: 'Get list of all open browser tabs',
     inputSchema: { type: 'object' as const, properties: {} },
   },
+  {
+    name: 'server_info',
+    description: 'Show current smartwriter-mcp server info: port, PID, and Chrome extension connection status',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'kill_other_instances',
+    description: 'Kill all other smartwriter-mcp instances running on this machine, keeping only the current one',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
 ];
 
 const COMMAND_MAP: Record<string, string> = {
@@ -311,6 +323,7 @@ async function main() {
     (process.env.SMARTWRITER_PORT ? parsePort(process.env.SMARTWRITER_PORT, 'environment') : DEFAULT_PORT);
 
   let port = requestedPort;
+  currentPort = port;
 
   if (await isPortInUse(port)) {
     if (cliOptions.autoFreePort) {
@@ -327,6 +340,7 @@ async function main() {
         `[Smartwriter MCP] Port ${port} is in use. Falling back to free port ${freePort} because --auto-port was provided.\n`
       );
       port = freePort;
+      currentPort = port;
     } else {
       process.stderr.write(
         `[Smartwriter MCP] ERROR: Port ${port} is already in use by another process.\n` +
@@ -399,6 +413,40 @@ async function main() {
         description: tool.description,
       }));
       return { content: [{ type: 'text', text: JSON.stringify(toolList, null, 2) }] };
+    }
+
+    if (name === 'server_info') {
+      const info = {
+        pid: process.pid,
+        port: currentPort,
+        extensionConnected: extensionWs !== null && extensionWs.readyState === WebSocket.OPEN,
+        wsUrl: `ws://localhost:${currentPort}`,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] };
+    }
+
+    if (name === 'kill_other_instances') {
+      try {
+        const output = execSync(
+          `ps aux | grep 'smartwriter-mcp' | grep -v grep | awk '{print $2}'`
+        ).toString().trim();
+        const pids = output.split('\n').map(Number).filter((p) => p && p !== process.pid);
+        if (pids.length === 0) {
+          return { content: [{ type: 'text', text: 'No other smartwriter-mcp instances found.' }] };
+        }
+        for (const pid of pids) {
+          try {
+            process.kill(pid, 'SIGTERM');
+          } catch {
+            // ignore if already dead
+          }
+        }
+        return {
+          content: [{ type: 'text', text: `Killed ${pids.length} instance(s): PIDs ${pids.join(', ')}` }],
+        };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `Error: ${String(error)}` }], isError: true };
+      }
     }
 
     const command = COMMAND_MAP[name];

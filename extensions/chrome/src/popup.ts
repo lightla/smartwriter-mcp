@@ -22,6 +22,7 @@ const focusBtn = document.getElementById('focusBtn') as HTMLButtonElement;
 
 let currentStatus: Status | null = null;
 let activeTabId: number | null = null;
+let isEditingServer = false;
 
 function renderServers(servers: ServerStatus[]) {
   if (servers.length === 0) {
@@ -56,26 +57,105 @@ function renderServers(servers: ServerStatus[]) {
 }
 
 function renderSettingsList(servers: ServerStatus[]) {
+  if (isEditingServer) return;
   if (servers.length === 0) {
     serverList.innerHTML = '';
     return;
   }
-  serverList.innerHTML = servers.map((srv) => {
-    const label = srv.name ? `${srv.name} · :${srv.port}` : `:${srv.port}`;
-    return `
-      <div class="server-entry">
-        <span class="server-entry-label">${label}</span>
-        <button class="remove-btn" data-port="${srv.port}" title="Remove">×</button>
-      </div>
-    `;
-  }).join('');
 
-  serverList.querySelectorAll('.remove-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const port = parseInt((btn as HTMLElement).dataset.port!);
+  serverList.innerHTML = servers.map((srv) => `
+    <div class="server-entry" data-port="${srv.port}" title="Double-click to edit">
+      <input class="entry-port" type="number" value="${srv.port}" min="1024" max="65535" readonly tabindex="-1" />
+      <input class="entry-name" type="text" value="${srv.name ?? ''}" placeholder="name (optional)" readonly tabindex="-1" />
+      <button class="remove-btn" title="Remove">×</button>
+    </div>
+  `).join('');
+
+  serverList.querySelectorAll<HTMLElement>('.server-entry').forEach((entry) => {
+    const origPort = parseInt(entry.dataset.port!);
+    const portInput = entry.querySelector<HTMLInputElement>('.entry-port')!;
+    const nameInput = entry.querySelector<HTMLInputElement>('.entry-name')!;
+    const origName = servers.find((s) => s.port === origPort)?.name ?? '';
+
+    const startEdit = (focusTarget: HTMLInputElement) => {
+      if (entry.classList.contains('editing')) return;
+      isEditingServer = true;
+      entry.classList.add('editing');
+      portInput.removeAttribute('readonly');
+      portInput.tabIndex = 0;
+      nameInput.removeAttribute('readonly');
+      nameInput.tabIndex = 0;
+      focusTarget.focus();
+      focusTarget.select();
+    };
+
+    const cancelEdit = () => {
+      entry.classList.remove('editing');
+      portInput.setAttribute('readonly', '');
+      portInput.tabIndex = -1;
+      nameInput.setAttribute('readonly', '');
+      nameInput.tabIndex = -1;
+      portInput.value = String(origPort);
+      nameInput.value = origName;
+      isEditingServer = false;
+    };
+
+    const applyEdit = async () => {
+      entry.classList.remove('editing');
+      portInput.setAttribute('readonly', '');
+      portInput.tabIndex = -1;
+      nameInput.setAttribute('readonly', '');
+      nameInput.tabIndex = -1;
+      isEditingServer = false;
+
+      const newPort = parseInt(portInput.value);
+      const newName = nameInput.value.trim() || undefined;
+
+      if (!currentStatus || !newPort || newPort < 1024 || newPort > 65535) {
+        portInput.value = String(origPort);
+        nameInput.value = origName;
+        return;
+      }
+      if (newPort !== origPort && currentStatus.servers.some((s) => s.port === newPort)) {
+        portInput.value = String(origPort);
+        return;
+      }
+      const unchanged = newPort === origPort && (newName ?? '') === origName;
+      if (unchanged) return;
+
+      const newServers = currentStatus.servers.map((s) =>
+        s.port === origPort ? { port: newPort, name: newName } : { port: s.port, name: s.name }
+      );
+      await chrome.runtime.sendMessage({ type: 'SET_SERVERS', servers: newServers });
+      await refresh();
+    };
+
+    entry.addEventListener('dblclick', (e) => {
+      const clicked = e.target as HTMLElement;
+      startEdit(clicked.closest('.entry-name') ? nameInput : portInput);
+    });
+
+    // focusout on the whole entry — fires when focus leaves to outside
+    entry.addEventListener('focusout', async (e) => {
+      if (!entry.classList.contains('editing')) return;
+      const next = (e as FocusEvent).relatedTarget as HTMLElement | null;
+      if (!entry.contains(next)) await applyEdit();
+    });
+
+    portInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); portInput.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+    });
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+    });
+
+    entry.querySelector('.remove-btn')!.addEventListener('click', async () => {
+      isEditingServer = false;
       if (!currentStatus) return;
       const newServers = currentStatus.servers
-        .filter((s) => s.port !== port)
+        .filter((s) => s.port !== origPort)
         .map((s) => ({ port: s.port, name: s.name }));
       await chrome.runtime.sendMessage({ type: 'SET_SERVERS', servers: newServers });
       await refresh();

@@ -1,22 +1,87 @@
-interface Status {
-  wsStatus: 'connected' | 'connecting' | 'waiting';
-  currentTabId: number | null;
+interface ServerStatus {
   port: number;
+  name?: string;
+  wsStatus: 'connected' | 'connecting' | 'waiting';
 }
 
-const mcpDot = document.getElementById('mcpDot')!;
-const mcpDesc = document.getElementById('mcpDesc')!;
+interface Status {
+  servers: ServerStatus[];
+  currentTabId: number | null;
+}
+
+const serversSection = document.getElementById('serversSection')!;
+const serverList = document.getElementById('serverList')!;
+const gearBtn = document.getElementById('gearBtn')!;
+const settingsPanel = document.getElementById('settingsPanel')!;
+const newPortInput = document.getElementById('newPort') as HTMLInputElement;
+const newNameInput = document.getElementById('newName') as HTMLInputElement;
+const addServerBtn = document.getElementById('addServerBtn')!;
 const tabTitle = document.getElementById('tabTitle')!;
 const connectBtn = document.getElementById('connectBtn') as HTMLButtonElement;
 const focusBtn = document.getElementById('focusBtn') as HTMLButtonElement;
-const gearBtn = document.getElementById('gearBtn')!;
-const settingsPanel = document.getElementById('settingsPanel')!;
-const portInput = document.getElementById('portInput') as HTMLInputElement;
-const savePortBtn = document.getElementById('savePortBtn')!;
 
 let currentStatus: Status | null = null;
 let activeTabId: number | null = null;
-let isEditingPort = false;
+
+function renderServers(servers: ServerStatus[]) {
+  if (servers.length === 0) {
+    serversSection.innerHTML = '<div class="empty-hint">No servers configured. Add one in settings.</div>';
+    return;
+  }
+  serversSection.innerHTML = servers.map((srv) => {
+    const label = srv.name || `Port ${srv.port}`;
+    const dotClass = srv.wsStatus === 'connected' ? 'connected' : 'waiting';
+    let descText: string;
+    let descColor: string;
+    if (srv.wsStatus === 'connected') {
+      descText = `Connected · ws://localhost:${srv.port}`;
+      descColor = '#16a34a';
+    } else if (srv.wsStatus === 'connecting') {
+      descText = `Connecting · ws://localhost:${srv.port}`;
+      descColor = '#2563eb';
+    } else {
+      descText = `Waiting · ws://localhost:${srv.port}`;
+      descColor = '#d97706';
+    }
+    return `
+      <div class="status-row">
+        <div class="dot ${dotClass}"></div>
+        <div>
+          <div class="status-label">${label}</div>
+          <div class="status-desc" style="color:${descColor}">${descText}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSettingsList(servers: ServerStatus[]) {
+  if (servers.length === 0) {
+    serverList.innerHTML = '';
+    return;
+  }
+  serverList.innerHTML = servers.map((srv) => {
+    const label = srv.name ? `${srv.name} · :${srv.port}` : `:${srv.port}`;
+    return `
+      <div class="server-entry">
+        <span class="server-entry-label">${label}</span>
+        <button class="remove-btn" data-port="${srv.port}" title="Remove">×</button>
+      </div>
+    `;
+  }).join('');
+
+  serverList.querySelectorAll('.remove-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const port = parseInt((btn as HTMLElement).dataset.port!);
+      if (!currentStatus) return;
+      const newServers = currentStatus.servers
+        .filter((s) => s.port !== port)
+        .map((s) => ({ port: s.port, name: s.name }));
+      await chrome.runtime.sendMessage({ type: 'SET_SERVERS', servers: newServers });
+      await refresh();
+    });
+  });
+}
 
 async function refresh() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -25,26 +90,9 @@ async function refresh() {
   const status = (await chrome.runtime.sendMessage({ type: 'GET_STATUS' })) as Status;
   currentStatus = status;
 
-  if (!isEditingPort) {
-    portInput.value = String(status.port);
-  }
+  renderServers(status.servers);
+  renderSettingsList(status.servers);
 
-  // MCP server status
-  if (status.wsStatus === 'connected') {
-    mcpDot.className = 'dot connected';
-    mcpDesc.textContent = `Connected · ws://localhost:${status.port}`;
-    mcpDesc.style.color = '#16a34a';
-  } else if (status.wsStatus === 'connecting') {
-    mcpDot.className = 'dot waiting';
-    mcpDesc.textContent = `Connecting to MCP server on :${status.port}`;
-    mcpDesc.style.color = '#2563eb';
-  } else {
-    mcpDot.className = 'dot waiting';
-    mcpDesc.textContent = `Waiting for MCP server on :${status.port}`;
-    mcpDesc.style.color = '#d97706';
-  }
-
-  // Tab connection
   const { currentTabId } = status;
 
   if (!currentTabId) {
@@ -98,22 +146,25 @@ gearBtn.addEventListener('click', () => {
   settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
 });
 
-portInput.addEventListener('focus', () => {
-  isEditingPort = true;
+addServerBtn.addEventListener('click', async () => {
+  const port = parseInt(newPortInput.value);
+  if (!port || port < 1024 || port > 65535) return;
+  if (!currentStatus) return;
+  if (currentStatus.servers.some((s) => s.port === port)) return;
+
+  const name = newNameInput.value.trim() || undefined;
+  const newServers = [
+    ...currentStatus.servers.map((s) => ({ port: s.port, name: s.name })),
+    { port, name },
+  ];
+  await chrome.runtime.sendMessage({ type: 'SET_SERVERS', servers: newServers });
+  newPortInput.value = '';
+  newNameInput.value = '';
+  await refresh();
 });
 
-portInput.addEventListener('blur', () => {
-  isEditingPort = false;
-});
-
-savePortBtn.addEventListener('click', async () => {
-  const port = parseInt(portInput.value);
-  if (port >= 1024 && port <= 65535) {
-    isEditingPort = false;
-    await chrome.runtime.sendMessage({ type: 'SET_PORT', port });
-    settingsPanel.style.display = 'none';
-    await refresh();
-  }
+newPortInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addServerBtn.click();
 });
 
 refresh();

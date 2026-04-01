@@ -3,26 +3,33 @@ import type { TabInfo, McpCommand, McpResponse, TabsUpdate } from './types';
 const DEFAULT_PORT = 9223;
 const RECONNECT_INTERVAL = 3000;
 
-let mcpSocket: WebSocket | null = null;
-let currentTabId: number | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let configuredPort: number = DEFAULT_PORT;
+type ServerConfig = { port: number; name?: string };
+type ConnState = { ws: WebSocket | null; timer: ReturnType<typeof setTimeout> | null };
 
-function getWsStatus(): 'connected' | 'connecting' | 'waiting' {
-  if (!mcpSocket) return 'waiting';
-  if (mcpSocket.readyState === WebSocket.OPEN) return 'connected';
-  if (mcpSocket.readyState === WebSocket.CONNECTING) return 'connecting';
+let currentTabId: number | null = null;
+let serverConfigs: ServerConfig[] = [{ port: DEFAULT_PORT }];
+const connMap = new Map<number, ConnState>();
+
+function getPortStatus(port: number): 'connected' | 'connecting' | 'waiting' {
+  const state = connMap.get(port);
+  if (!state?.ws) return 'waiting';
+  if (state.ws.readyState === WebSocket.OPEN) return 'connected';
+  if (state.ws.readyState === WebSocket.CONNECTING) return 'connecting';
   return 'waiting';
 }
 
 async function loadConfig(): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['smartwriterPort', 'smartwriterTabId'], async (result) => {
-      configuredPort = result.smartwriterPort || DEFAULT_PORT;
+    chrome.storage.local.get(['smartwriterServers', 'smartwriterPort', 'smartwriterTabId'], async (result) => {
+      if (result.smartwriterServers) {
+        serverConfigs = result.smartwriterServers as ServerConfig[];
+      } else if (result.smartwriterPort) {
+        // migrate from old single-port config
+        serverConfigs = [{ port: result.smartwriterPort as number }];
+      }
 
       const savedTabId = result.smartwriterTabId as number | undefined;
       if (savedTabId) {
-        // Verify the tab still exists before restoring
         try {
           await new Promise<void>((res, rej) => {
             chrome.tabs.get(savedTabId, (tab) => {
@@ -63,11 +70,10 @@ async function loadIconImageData(filename: string): Promise<Record<number, Image
 }
 
 function updateIcon(): void {
-  const fullyConnected =
-    mcpSocket !== null &&
-    mcpSocket.readyState === WebSocket.OPEN &&
+  const anyConnected =
+    [...connMap.values()].some((s) => s.ws !== null && s.ws.readyState === WebSocket.OPEN) &&
     currentTabId !== null;
-  setIcon(fullyConnected);
+  setIcon(anyConnected);
 }
 
 function setIcon(connected: boolean): void {
@@ -77,59 +83,95 @@ function setIcon(connected: boolean): void {
   }).catch(() => {});
 }
 
-function connectToMcp(): void {
-  if (mcpSocket && mcpSocket.readyState !== WebSocket.CLOSED) return;
+function connectToPort(cfg: ServerConfig): void {
+  const { port } = cfg;
+  let state = connMap.get(port);
+  if (!state) {
+    state = { ws: null, timer: null };
+    connMap.set(port, state);
+  }
+  if (state.ws && state.ws.readyState !== WebSocket.CLOSED) return;
 
-  mcpSocket = new WebSocket(`ws://localhost:${configuredPort}`);
+  const ws = new WebSocket(`ws://localhost:${port}`);
+  state.ws = ws;
 
-  mcpSocket.onopen = () => {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+  ws.onopen = () => {
+    if (state!.timer) {
+      clearTimeout(state!.timer);
+      state!.timer = null;
     }
     updateIcon();
     sendTabsUpdate();
   };
 
-  mcpSocket.onmessage = async (event: MessageEvent<string>) => {
+  ws.onmessage = async (event: MessageEvent<string>) => {
     try {
       const message = JSON.parse(event.data) as McpCommand;
       if (message.type === 'COMMAND') {
         const result = await handleCommand(message);
-        sendMcpResponse({ requestId: message.requestId, result });
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ requestId: message.requestId, result } as McpResponse));
+        }
       }
     } catch (error) {
       try {
         const msg = JSON.parse(event.data);
-        sendMcpResponse({
-          requestId: msg.requestId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            requestId: msg.requestId,
+            error: error instanceof Error ? error.message : String(error),
+          } as McpResponse));
+        }
       } catch {
         // ignore
       }
     }
   };
 
-  mcpSocket.onerror = () => {
-    mcpSocket = null;
+  ws.onerror = () => {
+    if (state!.ws === ws) state!.ws = null;
     updateIcon();
-    scheduleReconnect();
+    scheduleReconnect(cfg);
   };
 
-  mcpSocket.onclose = () => {
-    mcpSocket = null;
+  ws.onclose = () => {
+    if (state!.ws === ws) state!.ws = null;
     updateIcon();
-    scheduleReconnect();
+    scheduleReconnect(cfg);
   };
 }
 
-function scheduleReconnect(): void {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectToMcp();
+function scheduleReconnect(cfg: ServerConfig): void {
+  const state = connMap.get(cfg.port);
+  if (!state || state.timer) return;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    if (serverConfigs.some((s) => s.port === cfg.port)) {
+      connectToPort(cfg);
+    }
   }, RECONNECT_INTERVAL);
+}
+
+function disconnectPort(port: number): void {
+  const state = connMap.get(port);
+  if (!state) return;
+  if (state.timer) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  if (state.ws) {
+    state.ws.onclose = null;
+    state.ws.onerror = null;
+    state.ws.close();
+    state.ws = null;
+  }
+  connMap.delete(port);
+}
+
+function connectAll(): void {
+  for (const cfg of serverConfigs) {
+    connectToPort(cfg);
+  }
 }
 
 function withCallback<T>(fn: (callback: (result: T) => void) => void): Promise<T> {
@@ -333,14 +375,9 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
   });
 }
 
-function sendMcpResponse(response: McpResponse): void {
-  if (mcpSocket?.readyState === WebSocket.OPEN) {
-    mcpSocket.send(JSON.stringify(response));
-  }
-}
-
 function sendTabsUpdate(): void {
-  if (mcpSocket?.readyState !== WebSocket.OPEN) return;
+  const openStates = [...connMap.values()].filter((s) => s.ws?.readyState === WebSocket.OPEN);
+  if (openStates.length === 0) return;
   chrome.tabs.query({}, (tabs) => {
     const update: TabsUpdate = {
       type: 'TABS_UPDATE',
@@ -352,16 +389,22 @@ function sendTabsUpdate(): void {
       })),
       currentTabId,
     };
-    mcpSocket!.send(JSON.stringify(update));
+    const data = JSON.stringify(update);
+    for (const state of openStates) {
+      state.ws!.send(data);
+    }
   });
 }
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === 'GET_STATUS') {
     sendResponse({
-      wsStatus: getWsStatus(),
+      servers: serverConfigs.map((cfg) => ({
+        port: cfg.port,
+        name: cfg.name,
+        wsStatus: getPortStatus(cfg.port),
+      })),
       currentTabId,
-      port: configuredPort,
     });
   } else if (request.type === 'CONNECT_TAB') {
     currentTabId = request.tabId;
@@ -373,14 +416,16 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     updateIcon();
     sendTabsUpdate();
     sendResponse({ success: true });
-  } else if (request.type === 'SET_PORT') {
-    configuredPort = request.port;
-    chrome.storage.local.set({ smartwriterPort: request.port });
-    if (mcpSocket) {
-      mcpSocket.close();
-      mcpSocket = null;
+  } else if (request.type === 'SET_SERVERS') {
+    const newConfigs = request.servers as ServerConfig[];
+    const newPorts = new Set(newConfigs.map((c: ServerConfig) => c.port));
+    for (const cfg of serverConfigs) {
+      if (!newPorts.has(cfg.port)) disconnectPort(cfg.port);
     }
-    setTimeout(connectToMcp, 500);
+    serverConfigs = newConfigs;
+    chrome.storage.local.set({ smartwriterServers: serverConfigs });
+    for (const cfg of serverConfigs) connectToPort(cfg);
+    updateIcon();
     sendResponse({ success: true });
   }
 });
@@ -399,8 +444,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Keep service worker alive and reconnect WebSocket every 25s
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive') connectToMcp();
+  if (alarm.name === 'keepalive') connectAll();
 });
 
 setIcon(false);
-loadConfig().then(() => connectToMcp());
+loadConfig().then(() => connectAll());

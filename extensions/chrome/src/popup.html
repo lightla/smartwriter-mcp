@@ -35,21 +35,42 @@
       border-bottom: 1px solid #e2e8f0;
     }
     .settings-label { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
-    .settings-row { display: flex; gap: 6px; }
+
+    .server-entry {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+    }
+    .server-entry-label { font-size: 11px; color: #374151; flex: 1; }
+    .remove-btn {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 16px; line-height: 1; padding: 0 2px;
+      flex-shrink: 0;
+    }
+    .remove-btn:hover { color: #ef4444; }
+
+    .add-row { display: flex; gap: 4px; margin-top: 8px; }
     .port-input {
-      flex: 1; padding: 5px 8px;
+      width: 68px; padding: 5px 6px;
+      border: 1px solid #cbd5e1; border-radius: 5px;
+      font-size: 12px; outline: none; flex-shrink: 0;
+    }
+    .port-input:focus { border-color: #4f46e5; }
+    .name-input {
+      flex: 1; padding: 5px 6px;
       border: 1px solid #cbd5e1; border-radius: 5px;
       font-size: 12px; outline: none;
     }
-    .port-input:focus { border-color: #4f46e5; }
-    .save-btn {
-      padding: 5px 10px;
+    .name-input:focus { border-color: #4f46e5; }
+    .add-btn {
+      padding: 5px 8px;
       background: #4f46e5; color: #fff;
       border: none; border-radius: 5px;
       font-size: 11px; font-weight: 600; cursor: pointer;
+      flex-shrink: 0;
     }
-    .save-btn:hover { background: #4338ca; }
-    .settings-hint { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+    .add-btn:hover { background: #4338ca; }
 
     .section {
       padding: 10px 14px;
@@ -57,7 +78,8 @@
     }
     .section:last-child { border-bottom: none; }
 
-    .status-row { display: flex; align-items: center; gap: 8px; }
+    .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .status-row:last-child { margin-bottom: 0; }
     .dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: #94a3b8; flex-shrink: 0;
@@ -70,6 +92,8 @@
     }
     .status-label { font-size: 11px; font-weight: 600; color: #374151; }
     .status-desc { font-size: 10px; color: #6b7280; margin-top: 1px; }
+
+    .empty-hint { font-size: 11px; color: #94a3b8; }
 
     .tab-title {
       font-size: 11px; color: #6b7280;
@@ -103,22 +127,17 @@
   </div>
 
   <div class="settings-panel" id="settingsPanel">
-    <div class="settings-label">WebSocket Port</div>
-    <div class="settings-row">
-      <input class="port-input" id="portInput" type="number" placeholder="9223" min="1024" max="65535" />
-      <button class="save-btn" id="savePortBtn">Save</button>
+    <div class="settings-label">MCP Servers</div>
+    <div id="serverList"></div>
+    <div class="add-row">
+      <input class="port-input" id="newPort" type="number" placeholder="Port" min="1024" max="65535" />
+      <input class="name-input" id="newName" type="text" placeholder="Name (optional)" />
+      <button class="add-btn" id="addServerBtn">Add</button>
     </div>
-    <div class="settings-hint">Default: 9223. Change if port is occupied, then restart MCP server.</div>
   </div>
 
-  <div class="section">
-    <div class="status-row">
-      <div class="dot waiting" id="mcpDot"></div>
-      <div>
-        <div class="status-label">MCP Server</div>
-        <div class="status-desc" id="mcpDesc">Checking...</div>
-      </div>
-    </div>
+  <div class="section" id="serversSection">
+    <div class="empty-hint">Loading...</div>
   </div>
 
   <div class="section">

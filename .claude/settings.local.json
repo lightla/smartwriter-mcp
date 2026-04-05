@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl /home/light/.nvm/versions/node/v22.22.2/bin/node /home/light/workspace/ai/smartwriter-mcp/dist/index.js --auto-port)",
+      "Bash(kill %1)",
+      "Bash(wsl bash:*)",
+      "Bash(cmd /c \"wsl /home/light/.nvm/versions/node/v22.22.2/bin/node /home/light/workspace/ai/smartwriter-mcp/dist/index.js --auto-port\")",
+      "Bash(cmd /c \"wsl /home/light/.nvm/versions/node/v22.22.2/bin/node --version\")",
+      "Bash(powershell.exe -Command \"& wsl /home/light/.nvm/versions/node/v22.22.2/bin/node --version\")",
+      "Bash(powershell.exe -Command 'Get-ChildItem $env:LOCALAPPDATA | Where-Object { $_.Name -like '\\\\''*claude*'\\\\'' -or $_.Name -like '\\\\''*Claude*'\\\\'' -or $_.Name -like '\\\\''*Anthropic*'\\\\'' }')"
+    ]
+  }
+}

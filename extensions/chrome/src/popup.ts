@@ -7,6 +7,7 @@ interface ServerStatus {
 interface Status {
   servers: ServerStatus[];
   currentTabId: number | null;
+  trackingActive: boolean;
 }
 
 const serversSection = document.getElementById('serversSection')!;
@@ -19,6 +20,8 @@ const addServerBtn = document.getElementById('addServerBtn')!;
 const tabTitle = document.getElementById('tabTitle')!;
 const connectBtn = document.getElementById('connectBtn') as HTMLButtonElement;
 const focusBtn = document.getElementById('focusBtn') as HTMLButtonElement;
+const trackingBtn = document.getElementById('trackingBtn') as HTMLButtonElement;
+const trackingHint = document.getElementById('trackingHint')!;
 
 let currentStatus: Status | null = null;
 let activeTabId: number | null = null;
@@ -182,12 +185,15 @@ async function refresh() {
     connectBtn.textContent = 'Connect This Tab';
     connectBtn.className = 'btn btn-primary';
     focusBtn.style.display = 'none';
+    trackingBtn.style.display = 'none';
+    trackingHint.style.display = 'none';
   } else if (currentTabId === activeTabId) {
     tabTitle.textContent = 'This tab is connected';
     tabTitle.className = 'tab-title active';
     connectBtn.textContent = 'Disconnect';
     connectBtn.className = 'btn btn-danger';
     focusBtn.style.display = 'none';
+    updateTrackingButton(status.trackingActive);
   } else {
     const connectedTab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
       chrome.tabs.get(currentTabId, (tab) => {
@@ -202,6 +208,20 @@ async function refresh() {
     connectBtn.textContent = 'Connect This Tab';
     connectBtn.className = 'btn btn-primary';
     focusBtn.style.display = 'block';
+    updateTrackingButton(status.trackingActive);
+  }
+}
+
+function updateTrackingButton(active: boolean): void {
+  trackingBtn.style.display = 'block';
+  if (active) {
+    trackingBtn.textContent = 'Tracking ON';
+    trackingBtn.className = 'btn btn-track active';
+    trackingHint.style.display = 'block';
+  } else {
+    trackingBtn.textContent = 'Enable Tracking';
+    trackingBtn.className = 'btn btn-track';
+    trackingHint.style.display = 'none';
   }
 }
 
@@ -245,6 +265,12 @@ addServerBtn.addEventListener('click', async () => {
 
 newPortInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addServerBtn.click();
+});
+
+trackingBtn.addEventListener('click', async () => {
+  const resp = await chrome.runtime.sendMessage({ type: 'TOGGLE_TRACKING' }) as { active: boolean };
+  updateTrackingButton(resp.active);
+  if (currentStatus) currentStatus.trackingActive = resp.active;
 });
 
 refresh();

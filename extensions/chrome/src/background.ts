@@ -8,6 +8,7 @@ type ConnState = { ws: WebSocket | null; timer: ReturnType<typeof setTimeout> | 
 
 let currentTabId: number | null = null;
 let serverConfigs: ServerConfig[] = [{ port: DEFAULT_PORT }];
+const trackingTabIds = new Set<number>();
 const connMap = new Map<number, ConnState>();
 
 function getPortStatus(port: number): 'connected' | 'connecting' | 'waiting' {
@@ -348,6 +349,42 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
     });
   }
 
+  if (command === 'GET_ANNOTATIONS') {
+    return new Promise((resolve) => {
+      chrome.storage.local.get('smartwriterAnnotations', (result) => {
+        let annotations: unknown[] = result.smartwriterAnnotations || [];
+        const { url, type } = args as { url?: string; type?: string };
+        if (url) annotations = annotations.filter((a: any) => a.url === url);
+        if (type) annotations = annotations.filter((a: any) => a.type === type);
+        resolve(annotations);
+      });
+    });
+  }
+
+  if (command === 'CLEAR_ANNOTATIONS') {
+    return new Promise((resolve) => {
+      const { url } = args as { url?: string };
+      if (url) {
+        chrome.storage.local.get('smartwriterAnnotations', (result) => {
+          const kept = (result.smartwriterAnnotations || []).filter((a: any) => a.url !== url);
+          chrome.storage.local.set({ smartwriterAnnotations: kept }, () => resolve({ cleared: true, url }));
+        });
+      } else {
+        chrome.storage.local.set({ smartwriterAnnotations: [] }, () => resolve({ cleared: true }));
+      }
+    });
+  }
+
+  if (command === 'DELETE_ANNOTATION') {
+    return new Promise((resolve) => {
+      const { id } = args as { id: string };
+      chrome.storage.local.get('smartwriterAnnotations', (result) => {
+        const kept = (result.smartwriterAnnotations || []).filter((a: any) => a.id !== id);
+        chrome.storage.local.set({ smartwriterAnnotations: kept }, () => resolve({ deleted: true, id }));
+      });
+    });
+  }
+
   if (!currentTabId) {
     throw new Error('No tab connected. Click the Smartwriter MCP extension icon to connect a tab.');
   }
@@ -405,7 +442,25 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         wsStatus: getPortStatus(cfg.port),
       })),
       currentTabId,
+      trackingActive: currentTabId !== null && trackingTabIds.has(currentTabId),
     });
+  } else if (request.type === 'GET_TRACKING_STATE') {
+    const tabId = (_sender.tab?.id) ?? null;
+    sendResponse({ active: tabId !== null && trackingTabIds.has(tabId) });
+  } else if (request.type === 'STOP_TRACKING_FROM_CONTENT') {
+    const senderTabId = _sender.tab?.id;
+    if (senderTabId != null) trackingTabIds.delete(senderTabId);
+    sendResponse({ success: true });
+  } else if (request.type === 'TOGGLE_TRACKING') {
+    if (!currentTabId) { sendResponse({ success: false, active: false }); return true; }
+    if (trackingTabIds.has(currentTabId)) {
+      trackingTabIds.delete(currentTabId);
+      chrome.tabs.sendMessage(currentTabId, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
+    } else {
+      trackingTabIds.add(currentTabId);
+      chrome.tabs.sendMessage(currentTabId, { type: 'TOGGLE_TRACKING', active: true }).catch(() => {});
+    }
+    sendResponse({ success: true, active: trackingTabIds.has(currentTabId) });
   } else if (request.type === 'CONNECT_TAB') {
     currentTabId = request.tabId;
     if (currentTabId) {
@@ -431,13 +486,22 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 chrome.tabs.onActivated.addListener(() => sendTabsUpdate());
-chrome.tabs.onUpdated.addListener(() => sendTabsUpdate());
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // Re-inject tracking widget after navigation if it was active
+  if (changeInfo.status === 'complete' && trackingTabIds.has(tabId)) {
+    setTimeout(() => {
+      chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_TRACKING', active: true }).catch(() => {});
+    }, 400);
+  }
+  sendTabsUpdate();
+});
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === currentTabId) {
     currentTabId = null;
     chrome.storage.local.remove('smartwriterTabId');
     updateIcon();
   }
+  trackingTabIds.delete(tabId);
   sendTabsUpdate();
 });
 

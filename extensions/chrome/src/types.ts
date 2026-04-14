@@ -18,6 +18,7 @@ export type ContentMessage =
   | { type: 'PRESS_KEY'; key: string }
   | { type: 'GET_TEXT'; selector: string }
   | { type: 'GET_ATTRIBUTE'; selector: string; attribute: string }
+  | { type: 'TOGGLE_TRACKING'; active: boolean }
   | { type: 'UNREGISTER' };
 
 export type ContentResponse = {
@@ -52,3 +53,42 @@ export type TabsUpdate = {
   tabs: TabInfo[];
   currentTabId: number | null;
 };
+
+// ==================== ANNOTATION TYPES ====================
+
+export type AnnotationType = 'fix' | 'step' | 'bug';
+
+export interface AnnotationSelectors {
+  primary: string;
+  testId?: string;
+  id?: string;
+  cssPath: string;
+  xpath: string;
+  text?: string;
+}
+
+export interface AnnotationElement {
+  tag: string;
+  text?: string;
+  classList: string[];
+  attributes: Record<string, string>;
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+export interface AnnotationFramework {
+  type: 'react' | 'vue' | 'next' | 'nuxt' | 'unknown';
+  componentName?: string;
+  componentChain?: string[];
+}
+
+export interface Annotation {
+  id: string;
+  url: string;
+  timestamp: string;
+  type: AnnotationType;
+  note: string;
+  stepNumber?: number;
+  selectors: AnnotationSelectors;
+  element: AnnotationElement;
+  framework: AnnotationFramework;
+}

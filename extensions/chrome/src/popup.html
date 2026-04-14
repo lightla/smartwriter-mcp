@@ -137,6 +137,21 @@
       margin-top: 6px;
     }
     .btn-outline:hover { background: #eef2ff; }
+    .btn-track {
+      background: #f1f5f9; color: #475569;
+      border: 1.5px solid #e2e8f0;
+      margin-top: 6px;
+    }
+    .btn-track:hover { background: #e2e8f0; }
+    .btn-track.active {
+      background: #ecfdf5; color: #16a34a;
+      border-color: #86efac;
+    }
+    .btn-track.active:hover { background: #dcfce7; }
+    .tracking-hint {
+      font-size: 10px; color: #94a3b8;
+      margin-top: 5px; text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -163,6 +178,7 @@
     <div class="tab-title" id="tabTitle">Loading...</div>
     <button class="btn btn-primary" id="connectBtn">Connect This Tab</button>
     <button class="btn btn-outline" id="focusBtn" style="display:none">Focus Connected Tab</button>
+    <button class="btn btn-track" id="trackingBtn" style="display:none">Enable Tracking</button>
   </div>
 
   <script src="popup.js"></script>

@@ -292,6 +292,47 @@ const TOOLS = [
     description: 'Kill all other smartwriter-mcp instances running on this machine, keeping only the current one',
     inputSchema: { type: 'object' as const, properties: {} },
   },
+  {
+    name: 'get_annotations',
+    description:
+      'Get all tracked element annotations saved via the in-page tracking UI. ' +
+      'Each annotation includes: selectors.primary (use this with click/hover to target the element), ' +
+      'selectors.cssPath & selectors.xpath (fallbacks), element info (tag, text, classList, rect), ' +
+      'framework info (React/Vue component name and chain — useful for tracing back to a Next.js or Nuxt.js component), ' +
+      'type (fix = UI needs fixing, step = reproduction step, bug = bug location), note, and timestamp.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'Filter by page URL (optional)' },
+        type: {
+          type: 'string',
+          enum: ['fix', 'step', 'bug'],
+          description: 'Filter by annotation type (optional)',
+        },
+      },
+    },
+  },
+  {
+    name: 'clear_annotations',
+    description: 'Clear tracked element annotations. Clears all annotations, or only those for a specific URL.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'Clear only annotations for this URL (omit to clear all)' },
+      },
+    },
+  },
+  {
+    name: 'delete_annotation',
+    description: 'Delete a single annotation by its ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Annotation ID to delete' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 const COMMAND_MAP: Record<string, string> = {
@@ -314,6 +355,9 @@ const COMMAND_MAP: Record<string, string> = {
   get_text: 'GET_TEXT',
   get_attribute: 'GET_ATTRIBUTE',
   get_tabs: 'GET_TABS',
+  get_annotations: 'GET_ANNOTATIONS',
+  clear_annotations: 'CLEAR_ANNOTATIONS',
+  delete_annotation: 'DELETE_ANNOTATION',
 };
 
 async function main() {

@@ -359,7 +359,7 @@ function TabControls({
       : activeTab?.title || 'Current tab';
 
   return (
-    <section className="border-t border-stone-700 bg-stone-700 px-3 py-3">
+    <section className="border-t border-stone-700 bg-[#35302e] px-3 py-3">
       <div className="mb-2 flex items-start gap-2">
         <MousePointerClick className={cn('mt-0.5 h-4 w-4 shrink-0', isCurrentTabConnected ? 'text-teal-400' : 'text-stone-500')} />
         <div className="min-w-0">
@@ -395,7 +395,7 @@ function TabControls({
             type="button"
             variant={currentStatus.trackingActive ? 'success' : 'secondary'}
           >
-            {currentStatus.trackingActive ? 'Tracking ON' : 'Enable Tracking'}
+            {currentStatus.trackingActive ? 'Tracking On' : 'Tracking Off'}
           </Button>
           {currentStatus.trackingActive && (
             <div className="mt-2 text-center text-xs text-stone-400">

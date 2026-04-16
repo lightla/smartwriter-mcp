@@ -10,10 +10,10 @@ const buttonVariants = cva(
       variant: {
         default: 'border border-amber-700/50 bg-amber-900/40 text-amber-500 hover:bg-amber-900/60',
         destructive: 'border border-rose-700/50 bg-rose-900/40 text-rose-500 hover:bg-rose-900/60',
-        outline: 'border border-stone-700 bg-stone-800 text-stone-400 hover:bg-stone-700',
-        secondary: 'border border-teal-500/50 bg-teal-800/40 text-teal-400 hover:bg-teal-800/60',
+        outline: 'border border-stone-500/40 bg-stone-800 text-stone-300 hover:bg-stone-700/50',
+        secondary: 'border border-amber-700/50 bg-amber-950/30 text-amber-500/80 hover:bg-amber-900/40',
         ghost: 'text-stone-500 hover:bg-stone-800 hover:text-stone-400',
-        success: 'border border-teal-600 bg-teal-800 text-teal-100 hover:bg-teal-700',
+        success: 'border border-amber-500/70 bg-amber-800/40 text-amber-300 hover:bg-amber-700/50',
       },
       size: {
         default: 'h-10 px-4 py-2',

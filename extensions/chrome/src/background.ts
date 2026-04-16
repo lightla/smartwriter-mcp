@@ -110,6 +110,13 @@ function getIndexedAnnotations(annotations: Annotation[], url?: string, type?: s
     });
 }
 
+async function getAnnotationUrlFilter(args: { url?: string; all?: boolean }): Promise<string | undefined> {
+  if (args.all) return undefined;
+  if (args.url) return args.url;
+  if (!currentTabId) return undefined;
+  return (await getTab(currentTabId))?.url;
+}
+
 function sortIndexedAnnotations(rows: IndexedAnnotation[]): IndexedAnnotation[] {
   return [...rows].sort((a, b) => a.index - b.index);
 }
@@ -626,26 +633,29 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
   }
 
   if (command === 'GET_ANNOTATIONS') {
-    const { url, type } = args as { url?: string; type?: string };
-    return sortIndexedAnnotations(getIndexedAnnotations(await readAnnotations(), url, type)).map(({ annotation }) => annotation);
+    const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
+    const urlFilter = await getAnnotationUrlFilter({ url, all });
+    return sortIndexedAnnotations(getIndexedAnnotations(await readAnnotations(), urlFilter, type)).map(({ annotation }) => annotation);
   }
 
-  if (command === 'GET_SUMMARY_ANOTATIONS') {
-    const { url, type } = args as { url?: string; type?: string };
-    return formatAnnotationSummaries(getIndexedAnnotations(await readAnnotations(), url, type));
+  if (command === 'GET_SUMMARY_ANOTATIONS' || command === 'GET_ANNOTATION_SUMMARIES') {
+    const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
+    const urlFilter = await getAnnotationUrlFilter({ url, all });
+    return formatAnnotationSummaries(getIndexedAnnotations(await readAnnotations(), urlFilter, type));
   }
 
   if (command === 'CLEAR_ANNOTATIONS') {
+    const { url, all } = args as { url?: string; all?: boolean };
+    const urlFilter = await getAnnotationUrlFilter({ url, all });
     return new Promise((resolve) => {
-      const { url } = args as { url?: string };
-      if (url) {
-        chrome.storage.local.get('smartwriterAnnotations', (result) => {
-          const kept = (result.smartwriterAnnotations || []).filter((a: any) => a.url !== url);
-          chrome.storage.local.set({ smartwriterAnnotations: kept }, () => resolve({ cleared: true, url }));
+      chrome.storage.local.get('smartwriterAnnotations', (result) => {
+        const annotations = (result.smartwriterAnnotations || []) as Annotation[];
+        const kept = urlFilter ? annotations.filter((annotation) => annotation.url !== urlFilter) : [];
+        const deletedCount = annotations.length - kept.length;
+        chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
+          resolve(['cleared|scope|count', `true|${urlFilter ?? 'all'}|${deletedCount}`].join('\n'));
         });
-      } else {
-        chrome.storage.local.set({ smartwriterAnnotations: [] }, () => resolve({ cleared: true }));
-      }
+      });
     });
   }
 

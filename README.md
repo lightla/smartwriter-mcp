@@ -105,6 +105,8 @@ Annotation action flow keeps normal selectors working while allowing lower-token
 - get_summary_anotations() → id|type|note
                                a:1|change|Note 1
 - click({ selector: "a:1" })
+- clear_annotations() → cleared|scope|count
+                      true|https://current-page...|1
 - delete_annotation({ id: "a:1" }) → deleted
                                   true
 ```

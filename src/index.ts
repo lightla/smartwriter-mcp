@@ -105,11 +105,14 @@ function sendToExtension(command: string, args: Record<string, unknown>): Promis
 
 function psvCell(value: unknown): string {
   if (value === null || value === undefined) return '';
+  if (value instanceof Error) return value.message.replace(/\r?\n/g, '\\n');
   if (typeof value === 'string') return value.replace(/\r?\n/g, '\\n');
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
   if (Array.isArray(value)) return value.map((item) => psvCell(item)).join(';');
   if (typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>)
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return String(value).replace(/\r?\n/g, '\\n');
+    return entries
       .map(([key, nested]) => `${key}=${psvCell(nested)}`)
       .join(';');
   }
@@ -381,7 +384,8 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        url: { type: 'string', description: 'Filter by page URL (optional)' },
+        url: { type: 'string', description: 'Filter by page URL (optional). Defaults to the connected tab URL when omitted.' },
+        all: { type: 'boolean', description: 'Return annotations from all URLs instead of defaulting to the connected tab URL' },
         type: {
           type: 'string',
           enum: ['step', 'change', 'bug'],
@@ -399,7 +403,8 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        url: { type: 'string', description: 'Filter by page URL (optional)' },
+        url: { type: 'string', description: 'Filter by page URL (optional). Defaults to the connected tab URL when omitted.' },
+        all: { type: 'boolean', description: 'Return annotations from all URLs instead of defaulting to the connected tab URL' },
         type: {
           type: 'string',
           enum: ['step', 'change', 'bug'],
@@ -410,11 +415,13 @@ const TOOLS = [
   },
   {
     name: 'clear_annotations',
-    description: 'Clear tracked element annotations. Clears all annotations, or only those for a specific URL.',
+    description:
+      'Clear tracked element annotations. Defaults to the connected tab URL, or pass url for a specific page, or all=true for all pages. Returns PSV cleared|scope.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        url: { type: 'string', description: 'Clear only annotations for this URL (omit to clear all)' },
+        url: { type: 'string', description: 'Clear only annotations for this URL (optional). Defaults to the connected tab URL when omitted.' },
+        all: { type: 'boolean', description: 'Clear annotations from all URLs instead of defaulting to the connected tab URL' },
       },
     },
   },

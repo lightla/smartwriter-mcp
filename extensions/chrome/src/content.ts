@@ -342,7 +342,7 @@ function html2canvas(element: HTMLElement): Promise<HTMLCanvasElement> {
       return;
     }
 
-    ctx.fillStyle = '#f3f0eb';
+    ctx.fillStyle = '#a8a29e';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#000000';
     ctx.font = '14px sans-serif';
@@ -476,7 +476,7 @@ const TRACKING_CSS = `
   letter-spacing: 0.1em; text-transform: uppercase;
 }
 .__sw_ph_count__ {
-  background: rgba(214,200,181,0.12); color: #e7dcc8;
+  background: rgba(214,200,181,0.12); color: #a8a29e;
   font-size: 10px; font-weight: 700; padding: 1px 8px;
   border-radius: 10px; min-width: 22px; text-align: center;
 }
@@ -486,10 +486,10 @@ const TRACKING_CSS = `
   display: flex; align-items: center; justify-content: center;
   color: rgba(231,220,204,0.56); transition: background 0.12s, color 0.12s; outline: none;
 }
-.__sw_pb__:hover { background: rgba(214,200,181,0.12); color: #f3eadb; }
-.__sw_pb__.active { background: #5b4b2b; color: #f6e9d1; }
-.__sw_pb__.danger:hover { background: rgba(190,18,60,0.18); color: #fda4af; }
-.__sw_pb__.confirm { background: rgba(190,18,60,0.22); color: #fda4af; }
+.__sw_pb__:hover { background: rgba(214,200,181,0.12); color: #a8a29e; }
+.__sw_pb__.active { background: #5b4b2b; color: #a8a29e; }
+.__sw_pb__.danger:hover { background: rgba(190,18,60,0.18); color: #e11d48; }
+.__sw_pb__.confirm { background: rgba(190,18,60,0.22); color: #e11d48; }
 .__sw_pb_focus__ { flex-direction: column; gap: 3px; height: 46px; padding: 6px 0; }
 .__sw_pb_hint__ {
   font-size: 8px; font-weight: 700; letter-spacing: 0.06em; line-height: 1;
@@ -509,14 +509,14 @@ const TRACKING_CSS = `
   transform-origin: left bottom;
 }
 .__sw_marker__:hover { transform: scale(1.12); }
-.__sw_mk_step__   { background: #b45309; color: #fef3c7; }
-.__sw_mk_change__ { background: #0f766e; color: #ccfbf1; }
-.__sw_mk_bug__  { background: #e11d48; color: #fff1f2; }
-.__sw_mk_dot__ { width: 5px; height: 5px; border-radius: 50%; background: rgba(246,233,209,0.68); }
+.__sw_mk_step__   { background: #292524; color: #f59e0b; outline: 1px solid #b45309; }
+.__sw_mk_change__ { background: #292524; color: #14b8a6; outline: 1px solid #0f766e; }
+.__sw_mk_bug__  { background: #292524; color: #f43f5e; outline: 1px solid #e11d48; }
+.__sw_mk_dot__ { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 /* ── Marker tooltip ── */
 .__sw_mtip__ {
   position: fixed; z-index: 2147483646;
-  background: #292524; color: #f3eadb;
+  background: #292524; color: #a8a29e;
   border-radius: 12px; padding: 12px 14px 10px;
   width: 230px; box-shadow: 0 12px 38px rgba(36,26,16,0.42);
   font-family: -apple-system, sans-serif; font-size: 12px;
@@ -528,8 +528,8 @@ const TRACKING_CSS = `
   letter-spacing: 0.07em; padding: 2px 8px; border-radius: 4px; margin-bottom: 7px;
 }
 .__sw_mtb_change__ { background: rgba(15,118,110,0.22); color: #99f6e4; }
-.__sw_mtb_step__ { background: rgba(146,64,14,0.28);  color: #fcd34d; }
-.__sw_mtb_bug__  { background: rgba(159,18,57,0.22); color: #fda4af; }
+.__sw_mtb_step__ { background: rgba(146,64,14,0.28);  color: #d97706; }
+.__sw_mtb_bug__  { background: rgba(159,18,57,0.22); color: #e11d48; }
 .__sw_mtip_note__ {
   font-size: 12px; color: #d6c8b5; line-height: 1.5;
   margin-bottom: 7px; word-break: break-word;
@@ -540,7 +540,7 @@ const TRACKING_CSS = `
 }
 .__sw_mtip_del__ {
   display: flex; align-items: center; justify-content: center; gap: 5px;
-  width: 100%; padding: 6px; background: rgba(190,18,60,0.12); color: #fda4af;
+  width: 100%; padding: 6px; background: rgba(190,18,60,0.12); color: #e11d48;
   border: 1px solid rgba(190,18,60,0.24); border-radius: 7px;
   font-size: 11px; font-weight: 600; cursor: pointer;
   font-family: inherit; transition: background 0.12s; box-sizing: border-box;
@@ -580,7 +580,7 @@ const TRACKING_CSS = `
   background: rgba(214,200,181,0.10); border: none; cursor: pointer;
   color: #78716c; display: flex; align-items: center;
   justify-content: center; font-size: 16px; font-family: inherit;
-  transition: background 0.12s; outline: none; line-height: 1;
+  transition: background 0.12s; outline: none; line-height: 0; padding: 0;
 }
 .__sw_px__:hover { background: rgba(214,200,181,0.18); color: #d97706; }
 .__sw_ppath__ {
@@ -629,6 +629,7 @@ const TRACKING_CSS = `
 .__sw_fdel__ { background: rgba(225,29,72,0.1); color: #e11d48; border: 1px solid #e11d48; margin-right: auto; }
 .__sw_fdel__:hover { background: rgba(225,29,72,0.2); }
 .__sw_fpb__ {
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 9px 18px; border-radius: 10px; font-size: 13px; font-weight: 600;
   cursor: pointer; border: none; outline: none; font-family: inherit; transition: all 0.12s;
 }
@@ -644,7 +645,7 @@ const TRACKING_CSS = `
 /* ── Toast ── */
 #__sw_toast__ {
   position: fixed; bottom: 82px; right: 20px;
-  background: #292524; color: #f3eadb;
+  background: #292524; color: #a8a29e;
   padding: 8px 14px; border-radius: 8px;
   font-family: -apple-system, sans-serif; font-size: 12px; font-weight: 500;
   z-index: 2147483647; pointer-events: none;
@@ -655,7 +656,7 @@ const TRACKING_CSS = `
 /* ── Count badge on launcher ── */
 #__sw_badge__ {
   position: absolute; bottom: -5px; right: -5px;
-  background: #be123c; color: #f8e4e9;
+  background: #be123c; color: #1c1917;
   font-size: 9px; font-weight: 800; line-height: 14px;
   min-width: 16px; padding: 0 4px; border-radius: 8px;
   border: 2px solid #1c1917; text-align: center;
@@ -665,7 +666,7 @@ const TRACKING_CSS = `
 `;
 
 // SVG icons (feather-style)
-const SW_SVG_LAYERS = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f3eadb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
+const SW_SVG_LAYERS = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
 const SW_SVG_PICK = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4"/><path d="M21 7V3h-4"/><path d="M3 17v4h4"/><path d="M21 17v4h-4"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>`;
 const SW_SVG_EYE = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const SW_SVG_EYEOFF = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
@@ -1030,7 +1031,7 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
   popup.innerHTML = `
     <div class="__sw_ph2__">
       <span class="__sw_pt__">Edit Annotation</span>
-      <button class="__sw_px__" id="__sw_close_popup__">×</button>
+      <button class="__sw_px__" id="__sw_close_popup__"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
     </div>
     <div class="__sw_ppath__" title="${swEscHtml(bc)}">${swEscHtml(bc)}</div>
     <div class="__sw_pbody__">
@@ -1038,12 +1039,12 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
       <textarea class="__sw_ta__" id="__sw_note_text__" placeholder="Describe the issue...">${swEscHtml(ann.note)}</textarea>
       <div class="__sw_fl__">Type</div>
       <div class="__sw_pills__" id="__sw_type_pills__">
-        <button class="__sw_pill__ __sw_pstep__${ann.type === 'step' ? ' sel' : ''}" data-type="step">✅ Step</button>
-        <button class="__sw_pill__ __sw_pbug__${ann.type === 'bug' ? ' sel' : ''}" data-type="bug">🐛 Bug</button>
-        <button class="__sw_pill__ __sw_pchg__${ann.type === 'change' ? ' sel' : ''}" data-type="change">✏️ Change</button>
+        <button class="__sw_pill__ __sw_pstep__${ann.type === 'step' ? ' sel' : ''}" data-type="step"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="m9 12 2 2 4-4"/></svg> Step</button>
+        <button class="__sw_pill__ __sw_pbug__${ann.type === 'bug' ? ' sel' : ''}" data-type="bug"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c-2 2.1-3.6 3.8-5.53 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg> Bug</button>
+        <button class="__sw_pill__ __sw_pchg__${ann.type === 'change' ? ' sel' : ''}" data-type="change"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Change</button>
       </div>
       <div class="__sw_pfoot__">
-        <button class="__sw_fpb__ __sw_fdel__" id="__sw_delete_btn__">🗑 Delete</button>
+        <button class="__sw_fpb__ __sw_fdel__" id="__sw_delete_btn__"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button>
         <button class="__sw_fpb__ __sw_fpc__" id="__sw_cancel_btn__">Cancel</button>
         <button class="__sw_fpb__ __sw_fps__" id="__sw_save_btn__">Save <kbd>Ctrl+↵</kbd></button>
       </div>
@@ -1322,7 +1323,7 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
     popup.innerHTML = `
       <div class="__sw_ph2__">
         <span class="__sw_pt__">Add Annotation</span>
-        <button class="__sw_px__" id="__sw_close_popup__">×</button>
+        <button class="__sw_px__" id="__sw_close_popup__"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
       </div>
       <div class="__sw_ppath__" title="${swEscHtml(breadcrumb)}">${swEscHtml(breadcrumb)}</div>
       <div class="__sw_pbody__">
@@ -1330,9 +1331,9 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
         <textarea class="__sw_ta__" id="__sw_note_text__" placeholder="Describe the issue..."></textarea>
         <div class="__sw_fl__">Type</div>
         <div class="__sw_pills__" id="__sw_type_pills__">
-          <button class="__sw_pill__ __sw_pstep__ sel" data-type="step">✅ Step</button>
-          <button class="__sw_pill__ __sw_pbug__" data-type="bug">🐛 Bug</button>
-          <button class="__sw_pill__ __sw_pchg__" data-type="change">✏️ Change</button>
+          <button class="__sw_pill__ __sw_pstep__ sel" data-type="step"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="m9 12 2 2 4-4"/></svg> Step</button>
+          <button class="__sw_pill__ __sw_pbug__" data-type="bug"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c-2 2.1-3.6 3.8-5.53 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg> Bug</button>
+          <button class="__sw_pill__ __sw_pchg__" data-type="change"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Change</button>
         </div>
         <div class="__sw_pfoot__">
           <button class="__sw_fpb__ __sw_fpc__" id="__sw_cancel_btn__">Cancel</button>

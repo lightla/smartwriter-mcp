@@ -1,15 +1,63 @@
-import type { TabInfo, McpCommand, McpResponse, TabsUpdate } from './types';
+import type { Annotation, TabInfo, McpCommand, McpResponse, TabsUpdate } from './types';
 
 const DEFAULT_PORT = 9223;
 const RECONNECT_INTERVAL = 3000;
 
 type ServerConfig = { port: number; name?: string };
 type ConnState = { ws: WebSocket | null; timer: ReturnType<typeof setTimeout> | null };
+type DebuggerEvaluateResult = {
+  result?: { value?: unknown };
+  exceptionDetails?: {
+    exception?: { description?: string };
+    text?: string;
+  };
+};
 
 let currentTabId: number | null = null;
 let serverConfigs: ServerConfig[] = [{ port: DEFAULT_PORT }];
 const trackingTabIds = new Set<number>();
 const connMap = new Map<number, ConnState>();
+const ANNOTATION_MARKER_PREFIX = 'a:';
+const LEGACY_ELEMENT_REF_PREFIX = 'el:';
+const SELECTOR_COMMANDS = new Set([
+  'TYPE',
+  'FILL',
+  'SELECT',
+  'CHECK',
+  'UNCHECK',
+  'GET_SNAPSHOT',
+  'GET_TEXT',
+  'GET_ATTRIBUTE',
+]);
+
+type ResolvedSelector = {
+  selector: string;
+  originalSelector: string;
+  marker?: string;
+  index?: number;
+};
+
+type IndexedAnnotation = {
+  annotation: Annotation;
+  index: number;
+};
+
+type ResolvedAnnotationElement = {
+  annotation: Annotation;
+  index: number;
+  marker: string;
+  found: boolean;
+  selector?: string;
+  element?: {
+    tag: string;
+    text?: string;
+    rect: { x: number; y: number; width: number; height: number };
+    visible: boolean;
+    disabled?: boolean;
+  };
+  currentUrl?: string;
+  urlMatchesCurrentTab: boolean;
+};
 
 function getPortStatus(port: number): 'connected' | 'connecting' | 'waiting' {
   const state = connMap.get(port);
@@ -17,6 +65,113 @@ function getPortStatus(port: number): 'connected' | 'connecting' | 'waiting' {
   if (state.ws.readyState === WebSocket.OPEN) return 'connected';
   if (state.ws.readyState === WebSocket.CONNECTING) return 'connecting';
   return 'waiting';
+}
+
+function annotationMatchesType(annotation: Annotation, type?: string): boolean {
+  if (!type) return true;
+  return annotation.type === type;
+}
+
+function getAnnotationMarker(index: number): string {
+  return `${ANNOTATION_MARKER_PREFIX}${index}`;
+}
+
+function parseAnnotationMarker(value: string | undefined): number | null {
+  if (!value) return null;
+  if (value.startsWith(ANNOTATION_MARKER_PREFIX)) return parseAnnotationIndex(value.slice(ANNOTATION_MARKER_PREFIX.length));
+  if (value.startsWith(LEGACY_ELEMENT_REF_PREFIX)) return parseAnnotationIndex(value.slice(LEGACY_ELEMENT_REF_PREFIX.length));
+  return null;
+}
+
+function parseAnnotationIndex(value: unknown): number | null {
+  if (typeof value !== 'number' && !/^\d+$/.test(String(value))) return null;
+  const index = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  if (!Number.isInteger(index) || index < 1) return null;
+  return index;
+}
+
+function readAnnotations(): Promise<Annotation[]> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('smartwriterAnnotations', (result) => {
+      const annotations = ((result.smartwriterAnnotations || []) as Array<Annotation & { severity?: unknown }>).map(
+        ({ severity: _severity, ...annotation }) => annotation as Annotation
+      );
+      resolve(annotations);
+    });
+  });
+}
+
+function getIndexedAnnotations(annotations: Annotation[], url?: string, type?: string): IndexedAnnotation[] {
+  return annotations
+    .map((annotation, i) => ({ annotation, index: i + 1 }))
+    .filter(({ annotation }) => {
+      if (url && annotation.url !== url) return false;
+      return annotationMatchesType(annotation, type);
+    });
+}
+
+function sortIndexedAnnotations(rows: IndexedAnnotation[]): IndexedAnnotation[] {
+  return [...rows].sort((a, b) => a.index - b.index);
+}
+
+function formatAnnotationSummaries(rows: IndexedAnnotation[]): string {
+  const lines = sortIndexedAnnotations(rows).map(({ annotation, index }) => {
+    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
+    return `${getAnnotationMarker(index)}|${annotation.type}|${note}`;
+  });
+  return ['id|type|note', ...lines].join('\n');
+}
+
+function deleteAnnotationFromList(
+  annotations: Annotation[],
+  args: { index?: number | string; id?: string }
+): { kept: Annotation[]; deleted: boolean; index?: number; id?: string } {
+  const markerIndex = args.id ? parseAnnotationMarker(args.id) : null;
+  if (args.index !== undefined || markerIndex !== null) {
+    const index = markerIndex ?? parseAnnotationIndex(args.index);
+    if (index === null) {
+      throw new Error(`Invalid annotation index: ${String(args.index)}`);
+    }
+    const zeroBased = index - 1;
+    if (zeroBased < 0 || zeroBased >= annotations.length) {
+      return { kept: annotations, deleted: false, index };
+    }
+    return {
+      kept: annotations.filter((_, i) => i !== zeroBased),
+      deleted: true,
+      index,
+      id: annotations[zeroBased]?.id,
+    };
+  }
+
+  if (args.id) {
+    const kept = annotations.filter((annotation) => annotation.id !== args.id);
+    return { kept, deleted: kept.length !== annotations.length, id: args.id };
+  }
+
+  throw new Error('Missing index');
+}
+
+async function getAnnotationByIndex(indexValue: unknown): Promise<IndexedAnnotation> {
+  const index = parseAnnotationIndex(indexValue);
+  if (index === null) {
+    throw new Error(`Invalid annotation index: ${String(indexValue)}`);
+  }
+
+  const annotations = await readAnnotations();
+  const annotation = annotations[index - 1];
+  if (!annotation) {
+    throw new Error(`Annotation not found at index: ${index}`);
+  }
+  return { annotation, index };
+}
+
+async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      resolve(chrome.runtime.lastError ? null : tab);
+    });
+  });
 }
 
 async function loadConfig(): Promise<void> {
@@ -175,54 +330,30 @@ function connectAll(): void {
   }
 }
 
-function withCallback<T>(fn: (callback: (result: T) => void) => void): Promise<T> {
+function withCallback<T>(fn: (callback: (result?: T) => void) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     fn((result) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
-      resolve(result);
+      resolve(result as T);
     });
   });
 }
 
 async function evaluateWithDebugger(tabId: number, script: string, args?: unknown[]): Promise<unknown> {
   const target = { tabId };
-  const expression = `(async (...__smartwriterArgs) => {${script}
+  const argBindings = (args ?? [])
+    .map((_, i) => `const arg${i} = __smartwriterArgs[${i}];`)
+    .join('\n');
+  const expression = `(async (...__smartwriterArgs) => {
+${argBindings}
+${script}
 })(...${JSON.stringify(args ?? [])})`;
 
-  await withCallback<void>((callback) => chrome.debugger.attach(target, '1.3', callback));
-  try {
-    const result = await withCallback<chrome.debugger.EvaluateResult>((callback) =>
-      chrome.debugger.sendCommand(
-        target,
-        'Runtime.evaluate',
-        {
-          expression,
-          awaitPromise: true,
-          returnByValue: true,
-        },
-        callback
-      )
-    );
-
-    if (result.exceptionDetails) {
-      const description =
-        result.exceptionDetails.exception?.description ||
-        result.exceptionDetails.text ||
-        'Unknown evaluation error';
-      throw new Error(`Script evaluation failed: ${description}`);
-    }
-
-    return result.result?.value;
-  } finally {
-    try {
-      await withCallback<void>((callback) => chrome.debugger.detach(target, callback));
-    } catch {
-      // Ignore detach errors so the original evaluation failure can surface cleanly.
-    }
-  }
+  await ensureDebuggerAttached(tabId);
+  return evaluateInAttachedDebugger(target, expression, true);
 }
 
 let attachedDebuggerTabId: number | null = null;
@@ -237,12 +368,157 @@ async function ensureDebuggerAttached(tabId: number): Promise<void> {
   attachedDebuggerTabId = tabId;
 }
 
+async function evaluateInAttachedDebugger(
+  target: chrome.debugger.Debuggee,
+  expression: string,
+  returnByValue: boolean
+): Promise<unknown> {
+  const result = await withCallback<DebuggerEvaluateResult>((callback) =>
+    chrome.debugger.sendCommand(
+      target,
+      'Runtime.evaluate',
+      {
+        expression,
+        awaitPromise: true,
+        returnByValue,
+      },
+      callback
+    )
+  );
+
+  if (result.exceptionDetails) {
+    const description =
+      result.exceptionDetails.exception?.description ||
+      result.exceptionDetails.text ||
+      'Unknown evaluation error';
+    throw new Error(`Script evaluation failed: ${description}`);
+  }
+
+  return result.result?.value;
+}
+
+async function resolveAnnotationElement(tabId: number, indexValue: unknown): Promise<ResolvedAnnotationElement> {
+  const { annotation, index } = await getAnnotationByIndex(indexValue);
+  const tab = await getTab(tabId);
+  const marker = getAnnotationMarker(index);
+  const selectors = [annotation.selectors?.primary, annotation.selectors?.cssPath].filter(Boolean);
+
+  const expression = `(() => {
+    const selectors = ${JSON.stringify(selectors)};
+    let element = null;
+    let matchedSelector = null;
+    for (const selector of selectors) {
+      try {
+        element = document.querySelector(selector);
+        if (element) {
+          matchedSelector = selector;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (!element) return { found: false };
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return {
+      found: true,
+      selector: matchedSelector,
+      element: {
+        tag: element.tagName.toLowerCase(),
+        text: (element.textContent || '').trim().slice(0, 200) || undefined,
+        rect: {
+          x: Math.round(rect.left + window.scrollX),
+          y: Math.round(rect.top + window.scrollY),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+        visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden',
+        disabled: 'disabled' in element ? Boolean(element.disabled) : undefined,
+      },
+    };
+  })()`;
+
+  await ensureDebuggerAttached(tabId);
+  const resolved = (await evaluateInAttachedDebugger({ tabId }, expression, true)) as
+    | { found: false }
+    | {
+        found: true;
+        selector: string;
+        element: ResolvedAnnotationElement['element'];
+      };
+
+  return {
+    annotation,
+    index,
+    marker,
+    found: resolved.found,
+    selector: resolved.found ? resolved.selector : undefined,
+    element: resolved.found ? resolved.element : undefined,
+    currentUrl: tab?.url,
+    urlMatchesCurrentTab: tab?.url === annotation.url,
+  };
+}
+
+async function resolveSelectorArgument(tabId: number, selector: string): Promise<ResolvedSelector> {
+  const index = parseAnnotationMarker(selector);
+  if (index === null) {
+    return { selector, originalSelector: selector };
+  }
+
+  const resolved = await resolveAnnotationElement(tabId, index);
+  if (!resolved.found || !resolved.selector) {
+    throw new Error(`Element not found for index: ${index}`);
+  }
+
+  return {
+    selector: resolved.selector,
+    originalSelector: selector,
+    marker: resolved.marker,
+    index,
+  };
+}
+
+function scrubSelectorResult(result: unknown, resolved: ResolvedSelector): unknown {
+  if (!resolved.index || !result || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+
+  return {
+    ...(result as Record<string, unknown>),
+    selector: resolved.marker,
+    marker: resolved.marker,
+    index: resolved.index,
+  };
+}
+
+function sanitizeSelectorError(error: unknown, resolved: ResolvedSelector): Error {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (!resolved.index) return new Error(raw);
+  const sanitized = raw.split(resolved.selector).join(resolved.marker ?? resolved.originalSelector);
+  return new Error(sanitized);
+}
+
+async function sendContentCommand(tabId: number, command: string, args: Record<string, unknown>): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Command timeout: ${command}`)), 30000);
+    chrome.tabs.sendMessage(tabId, { type: command, ...args }, (response) => {
+      clearTimeout(timeout);
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (response?.success) {
+        resolve(response.data);
+      } else {
+        reject(new Error(response?.error || 'Unknown error'));
+      }
+    });
+  });
+}
+
 async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: string): Promise<unknown> {
   const target = { tabId };
   await ensureDebuggerAttached(tabId);
   try {
     // Get element center + scroll into view
-    const posResult = await withCallback<chrome.debugger.EvaluateResult>((cb) =>
+    const posResult = await withCallback<DebuggerEvaluateResult>((cb) =>
       chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
         expression: `(() => {
           const el = document.querySelector(${JSON.stringify(selector)});
@@ -258,7 +534,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
     if (!pos) throw new Error(`Element not found: ${selector}`);
 
     // Animate dot from previous position to target
-    await withCallback<chrome.debugger.EvaluateResult>((cb) =>
+    await withCallback<DebuggerEvaluateResult>((cb) =>
       chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
         expression: `(() => {
           const DOT_ID = '__sw_cursor__';
@@ -292,7 +568,7 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
 
     if (command === 'CLICK') {
       // Pulse animation on click
-      await withCallback<chrome.debugger.EvaluateResult>((cb) =>
+      await withCallback<DebuggerEvaluateResult>((cb) =>
         chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
           expression: `(() => {
             const dot = document.getElementById('__sw_cursor__');
@@ -311,10 +587,10 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
         }, cb)
       );
       await new Promise((r) => setTimeout(r, 30));
-      await withCallback<void>((cb) =>
+      await withCallback<unknown>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );
-      await withCallback<void>((cb) =>
+      await withCallback<unknown>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );
       return { clicked: true, selector, x: pos.x, y: pos.y };
@@ -350,15 +626,13 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
   }
 
   if (command === 'GET_ANNOTATIONS') {
-    return new Promise((resolve) => {
-      chrome.storage.local.get('smartwriterAnnotations', (result) => {
-        let annotations: unknown[] = result.smartwriterAnnotations || [];
-        const { url, type } = args as { url?: string; type?: string };
-        if (url) annotations = annotations.filter((a: any) => a.url === url);
-        if (type) annotations = annotations.filter((a: any) => a.type === type);
-        resolve(annotations);
-      });
-    });
+    const { url, type } = args as { url?: string; type?: string };
+    return sortIndexedAnnotations(getIndexedAnnotations(await readAnnotations(), url, type)).map(({ annotation }) => annotation);
+  }
+
+  if (command === 'GET_SUMMARY_ANOTATIONS') {
+    const { url, type } = args as { url?: string; type?: string };
+    return formatAnnotationSummaries(getIndexedAnnotations(await readAnnotations(), url, type));
   }
 
   if (command === 'CLEAR_ANNOTATIONS') {
@@ -377,10 +651,12 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
 
   if (command === 'DELETE_ANNOTATION') {
     return new Promise((resolve) => {
-      const { id } = args as { id: string };
       chrome.storage.local.get('smartwriterAnnotations', (result) => {
-        const kept = (result.smartwriterAnnotations || []).filter((a: any) => a.id !== id);
-        chrome.storage.local.set({ smartwriterAnnotations: kept }, () => resolve({ deleted: true, id }));
+        const annotations = (result.smartwriterAnnotations || []) as Annotation[];
+        const deleted = deleteAnnotationFromList(annotations, args as { index?: number | string; id?: string });
+        chrome.storage.local.set({ smartwriterAnnotations: deleted.kept }, () => {
+          resolve(['deleted', deleted.deleted ? 'true' : 'false'].join('\n'));
+        });
       });
     });
   }
@@ -390,26 +666,48 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
   }
 
   if (command === 'EVALUATE') {
-    return evaluateWithDebugger(currentTabId, String(args.script ?? ''), args.args as unknown[] | undefined);
+    const { marker, elementId, index } = args as { marker?: string; elementId?: string; index?: number | string };
+    let script = String(args.script ?? '');
+
+    let ref = marker ?? elementId;
+    if (!ref && index !== undefined) {
+      const parsedIndex = parseAnnotationIndex(index);
+      if (parsedIndex === null) throw new Error(`Invalid annotation index: ${String(index)}`);
+      ref = getAnnotationMarker(parsedIndex);
+    }
+    if (ref) {
+      const resolved = await resolveSelectorArgument(currentTabId, ref);
+      script = `const element = document.querySelector(${JSON.stringify(resolved.selector)});
+if (!element) throw new Error(${JSON.stringify(`Element not found for index: ${resolved.index}`)});
+${script}`;
+    }
+
+    return evaluateWithDebugger(currentTabId, script, args.args as unknown[] | undefined);
   }
 
   if (command === 'HOVER' || command === 'CLICK') {
-    return mouseAction(currentTabId, command, String(args.selector ?? ''));
+    const resolved = await resolveSelectorArgument(currentTabId, String(args.selector ?? ''));
+    try {
+      return scrubSelectorResult(await mouseAction(currentTabId, command, resolved.selector), resolved);
+    } catch (error) {
+      throw sanitizeSelectorError(error, resolved);
+    }
   }
 
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Command timeout: ${command}`)), 30000);
-    chrome.tabs.sendMessage(currentTabId!, { type: command, ...args }, (response) => {
-      clearTimeout(timeout);
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else if (response?.success) {
-        resolve(response.data);
-      } else {
-        reject(new Error(response?.error || 'Unknown error'));
-      }
-    });
-  });
+  if (SELECTOR_COMMANDS.has(command) && typeof args.selector === 'string') {
+    const resolved = await resolveSelectorArgument(currentTabId, args.selector);
+    try {
+      const result = await sendContentCommand(currentTabId, command, {
+        ...args,
+        selector: resolved.selector,
+      });
+      return scrubSelectorResult(result, resolved);
+    } catch (error) {
+      throw sanitizeSelectorError(error, resolved);
+    }
+  }
+
+  return sendContentCommand(currentTabId, command, args);
 }
 
 function sendTabsUpdate(): void {

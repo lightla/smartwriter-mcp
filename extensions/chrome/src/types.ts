@@ -8,7 +8,7 @@ export type ContentMessage =
   | { type: 'GO_BACK' }
   | { type: 'GO_FORWARD' }
   | { type: 'RELOAD' }
-  | { type: 'EVALUATE'; script: string; args?: unknown[] }
+  | { type: 'EVALUATE'; script: string; args?: unknown[]; marker?: string; index?: number }
   | { type: 'HOVER'; selector: string }
   | { type: 'CHECK'; selector: string }
   | { type: 'UNCHECK'; selector: string }
@@ -56,7 +56,7 @@ export type TabsUpdate = {
 
 // ==================== ANNOTATION TYPES ====================
 
-export type AnnotationType = 'fix' | 'step' | 'bug';
+export type AnnotationType = 'step' | 'change' | 'bug';
 
 export interface AnnotationSelectors {
   primary: string;

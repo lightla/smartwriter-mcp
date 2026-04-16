@@ -103,6 +103,69 @@ function sendToExtension(command: string, args: Record<string, unknown>): Promis
   });
 }
 
+function psvCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.replace(/\r?\n/g, '\\n');
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (Array.isArray(value)) return value.map((item) => psvCell(item)).join(';');
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, nested]) => `${key}=${psvCell(nested)}`)
+      .join(';');
+  }
+  return String(value);
+}
+
+function flattenPsvObject(value: Record<string, unknown>, prefix = ''): Record<string, string> {
+  const row: Record<string, string> = {};
+
+  for (const [key, nested] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (
+      nested &&
+      typeof nested === 'object' &&
+      !Array.isArray(nested) &&
+      !(nested instanceof Date)
+    ) {
+      Object.assign(row, flattenPsvObject(nested as Record<string, unknown>, path));
+    } else {
+      row[path] = psvCell(nested);
+    }
+  }
+
+  return row;
+}
+
+function formatPsv(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value !== 'object') return psvCell(value);
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '';
+    if (value.every((item) => item && typeof item === 'object' && !Array.isArray(item))) {
+      const rows = value.map((item) => flattenPsvObject(item as Record<string, unknown>));
+      const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+      return [headers.join('|'), ...rows.map((row) => headers.map((header) => row[header] ?? '').join('|'))].join('\n');
+    }
+    return ['value', ...value.map((item) => psvCell(item))].join('\n');
+  }
+
+  const flattened = flattenPsvObject(value as Record<string, unknown>);
+  return ['key|value', ...Object.entries(flattened).map(([key, cell]) => `${key}|${cell}`)].join('\n');
+}
+
+function textResponse(value: unknown) {
+  return { content: [{ type: 'text' as const, text: formatPsv(value) }] };
+}
+
+function errorResponse(message: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: `error|message\ntrue|${psvCell(message)}` }],
+    isError: true,
+  };
+}
+
 const TOOLS = [
   {
     name: 'list_tools',
@@ -138,7 +201,7 @@ const TOOLS = [
     description: 'Click an element in the connected tab',
     inputSchema: {
       type: 'object' as const,
-      properties: { selector: { type: 'string', description: 'CSS selector of element to click' } },
+      properties: { selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' } },
       required: ['selector'],
     },
   },
@@ -148,7 +211,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' },
         text: { type: 'string' },
       },
       required: ['selector', 'text'],
@@ -160,7 +223,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' },
         value: { type: 'string' },
       },
       required: ['selector', 'value'],
@@ -172,7 +235,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' },
         options: {
           type: 'array',
           items: { type: 'string' },
@@ -187,7 +250,7 @@ const TOOLS = [
     description: 'Check a checkbox or radio input',
     inputSchema: {
       type: 'object' as const,
-      properties: { selector: { type: 'string' } },
+      properties: { selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' } },
       required: ['selector'],
     },
   },
@@ -196,7 +259,7 @@ const TOOLS = [
     description: 'Uncheck a checkbox input',
     inputSchema: {
       type: 'object' as const,
-      properties: { selector: { type: 'string' } },
+      properties: { selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' } },
       required: ['selector'],
     },
   },
@@ -206,7 +269,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'Optional CSS selector to scope snapshot' },
+        selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a:1 from get_summary_anotations to scope snapshot' },
       },
     },
   },
@@ -217,11 +280,26 @@ const TOOLS = [
   },
   {
     name: 'evaluate',
-    description: 'Execute JavaScript in the connected tab and return result',
+    description:
+      'Execute JavaScript in the connected tab and return result. ' +
+      'Optionally pass marker like a:1 from get_summary_anotations or index to expose the resolved DOM node as `element` inside the script.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         script: { type: 'string', description: 'JavaScript code to execute' },
+        args: {
+          type: 'array',
+          items: {},
+          description: 'Optional positional arguments available as arg0, arg1, ... inside the script',
+        },
+        marker: {
+          type: 'string',
+          description: 'Optional annotation marker from get_summary_anotations, e.g. a:1',
+        },
+        index: {
+          type: 'number',
+          description: 'Optional annotation index from get_summary_anotations; resolved element is available as `element` inside the script',
+        },
       },
       required: ['script'],
     },
@@ -231,7 +309,7 @@ const TOOLS = [
     description: 'Hover over an element',
     inputSchema: {
       type: 'object' as const,
-      properties: { selector: { type: 'string' } },
+      properties: { selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' } },
       required: ['selector'],
     },
   },
@@ -261,7 +339,7 @@ const TOOLS = [
     description: 'Get text content from an element',
     inputSchema: {
       type: 'object' as const,
-      properties: { selector: { type: 'string' } },
+      properties: { selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' } },
       required: ['selector'],
     },
   },
@@ -271,7 +349,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_anotations' },
         attribute: { type: 'string' },
       },
       required: ['selector', 'attribute'],
@@ -299,14 +377,32 @@ const TOOLS = [
       'Each annotation includes: selectors.primary (use this with click/hover to target the element), ' +
       'selectors.cssPath & selectors.xpath (fallbacks), element info (tag, text, classList, rect), ' +
       'framework info (React/Vue component name and chain — useful for tracing back to a Next.js or Nuxt.js component), ' +
-      'type (fix = UI needs fixing, step = reproduction step, bug = bug location), note, and timestamp.',
+      'type (step = reproduction step, change = requested UI change, bug = bug location), note, and timestamp.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         url: { type: 'string', description: 'Filter by page URL (optional)' },
         type: {
           type: 'string',
-          enum: ['fix', 'step', 'bug'],
+          enum: ['step', 'change', 'bug'],
+          description: 'Filter by annotation type (optional)',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_summary_anotations',
+    description:
+      'Get compact tracked element annotations for the agent to read. ' +
+      'Returns plain text lines in the format id|type|note. Type is preserved as saved; selector details are intentionally hidden. ' +
+      'The note field may contain | characters; split only the first two separators.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'Filter by page URL (optional)' },
+        type: {
+          type: 'string',
+          enum: ['step', 'change', 'bug'],
           description: 'Filter by annotation type (optional)',
         },
       },
@@ -324,13 +420,13 @@ const TOOLS = [
   },
   {
     name: 'delete_annotation',
-    description: 'Delete a single annotation by its ID.',
+    description: 'Delete a single annotation permanently by annotation marker id like a:1, by index, or by legacy ID. Returns plain text deleted.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'Annotation ID to delete' },
+        index: { type: 'number', description: 'Annotation index from get_summary_anotations' },
+        id: { type: 'string', description: 'Annotation marker from get_summary_anotations, e.g. a:1, or a legacy annotation ID' },
       },
-      required: ['id'],
     },
   },
 ];
@@ -356,6 +452,7 @@ const COMMAND_MAP: Record<string, string> = {
   get_attribute: 'GET_ATTRIBUTE',
   get_tabs: 'GET_TABS',
   get_annotations: 'GET_ANNOTATIONS',
+  get_summary_anotations: 'GET_SUMMARY_ANOTATIONS',
   clear_annotations: 'CLEAR_ANNOTATIONS',
   delete_annotation: 'DELETE_ANNOTATION',
 };
@@ -456,7 +553,7 @@ async function main() {
         name: tool.name,
         description: tool.description,
       }));
-      return { content: [{ type: 'text', text: JSON.stringify(toolList, null, 2) }] };
+      return textResponse(toolList);
     }
 
     if (name === 'server_info') {
@@ -466,7 +563,7 @@ async function main() {
         extensionConnected: extensionWs !== null && extensionWs.readyState === WebSocket.OPEN,
         wsUrl: `ws://localhost:${currentPort}`,
       };
-      return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] };
+      return textResponse(info);
     }
 
     if (name === 'kill_other_instances') {
@@ -476,7 +573,7 @@ async function main() {
         ).toString().trim();
         const pids = output.split('\n').map(Number).filter((p) => p && p !== process.pid);
         if (pids.length === 0) {
-          return { content: [{ type: 'text', text: 'No other smartwriter-mcp instances found.' }] };
+          return textResponse({ killed: 0, pids: '' });
         }
         for (const pid of pids) {
           try {
@@ -485,29 +582,21 @@ async function main() {
             // ignore if already dead
           }
         }
-        return {
-          content: [{ type: 'text', text: `Killed ${pids.length} instance(s): PIDs ${pids.join(', ')}` }],
-        };
+        return textResponse({ killed: pids.length, pids: pids.join(';') });
       } catch (error) {
-        return { content: [{ type: 'text', text: `Error: ${String(error)}` }], isError: true };
+        return errorResponse(error);
       }
     }
 
     const command = COMMAND_MAP[name];
     if (!command) {
-      return {
-        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-        isError: true,
-      };
+      return errorResponse(`Unknown tool: ${name}`);
     }
     try {
       const result = await sendToExtension(command, args as Record<string, unknown>);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return textResponse(result);
     } catch (error) {
-      return {
-        content: [{ type: 'text', text: String(error) }],
-        isError: true,
-      };
+      return errorResponse(error);
     }
   });
 

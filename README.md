@@ -92,6 +92,21 @@ Load `dist/` folder in Chrome:
 - wait_for(text, timeout?) → Wait for text to appear on page
 - get_text(selector) → Read text content from an element
 - get_attribute(selector, attribute) → Read an element attribute
+- get_summary_anotations(url?, type?) → Read compact annotations as plain text: id|type|note
+```
+
+Annotation action flow keeps normal selectors working while allowing lower-token annotation markers:
+
+```javascript
+// Existing path still works:
+- click({ selector: ".submit-button" })
+
+// Compact annotation path:
+- get_summary_anotations() → id|type|note
+                               a:1|change|Note 1
+- click({ selector: "a:1" })
+- delete_annotation({ id: "a:1" }) → deleted
+                                  true
 ```
 
 ## Key Features

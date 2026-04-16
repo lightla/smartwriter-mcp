@@ -299,7 +299,7 @@ function getCssSelector(element: HTMLElement): string {
       break;
     }
 
-    const parent = current.parentElement;
+    const parent: Element | null = current.parentElement;
     if (parent) {
       const siblings = parent.children;
       if (siblings.length > 1) {
@@ -614,9 +614,6 @@ const TRACKING_CSS = `
 .__sw_pchg__.sel  { border-color: #3b82f6; background: rgba(59,130,246,0.15); color: #93c5fd; }
 .__sw_pstep__.sel { border-color: #f59e0b; background: rgba(245,158,11,0.15); color: #fcd34d; }
 .__sw_pbug__.sel  { border-color: #8b5cf6; background: rgba(139,92,246,0.15); color: #c4b5fd; }
-.__sw_pblk__.sel  { border-color: #ef4444; background: rgba(239,68,68,0.12);  color: #fca5a5; }
-.__sw_pimp__.sel  { border-color: #f59e0b; background: rgba(245,158,11,0.12); color: #fcd34d; }
-.__sw_psug__.sel  { border-color: #10b981; background: rgba(16,185,129,0.12); color: #6ee7b7; }
 .__sw_si__ { display: none; align-items: center; gap: 6px; margin-bottom: 14px; }
 .__sw_si__.show { display: flex; }
 .__sw_sil__ { font-size: 11px; color: rgba(255,255,255,0.45); font-weight: 600; }
@@ -1044,12 +1041,6 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
         <button class="__sw_pill__ __sw_pbug__${ann.type === 'bug' ? ' sel' : ''}" data-type="bug">🐛 Bug</button>
         <button class="__sw_pill__ __sw_pchg__${ann.type === 'change' ? ' sel' : ''}" data-type="change">✏️ Change</button>
       </div>
-      <div class="__sw_fl__">Severity</div>
-      <div class="__sw_pills__" id="__sw_sev_pills__">
-        <button class="__sw_pill__ __sw_pimp__${(ann.severity ?? 'important') === 'important' ? ' sel' : ''}" data-sev="important">⚠️ Important</button>
-        <button class="__sw_pill__ __sw_pblk__${ann.severity === 'blocking' ? ' sel' : ''}" data-sev="blocking">⛔ Blocking</button>
-        <button class="__sw_pill__ __sw_psug__${ann.severity === 'suggestion' ? ' sel' : ''}" data-sev="suggestion">💡 Suggestion</button>
-      </div>
       <div class="__sw_pfoot__">
         <button class="__sw_fpb__ __sw_fdel__" id="__sw_delete_btn__">🗑 Delete</button>
         <button class="__sw_fpb__ __sw_fpc__" id="__sw_cancel_btn__">Cancel</button>
@@ -1070,21 +1061,12 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
   document.addEventListener('keydown', escHandler);
 
   let selectedType: 'change' | 'step' | 'bug' = ann.type;
-  let selectedSev: 'blocking' | 'important' | 'suggestion' = ann.severity ?? 'important';
 
   popup.querySelectorAll<HTMLElement>('#__sw_type_pills__ .__sw_pill__').forEach(btn => {
     btn.addEventListener('click', () => {
       popup.querySelectorAll('#__sw_type_pills__ .__sw_pill__').forEach(b => b.classList.remove('sel'));
       btn.classList.add('sel');
       selectedType = btn.dataset.type as 'change' | 'step' | 'bug';
-    });
-  });
-
-  popup.querySelectorAll<HTMLElement>('#__sw_sev_pills__ .__sw_pill__').forEach(btn => {
-    btn.addEventListener('click', () => {
-      popup.querySelectorAll('#__sw_sev_pills__ .__sw_pill__').forEach(b => b.classList.remove('sel'));
-      btn.classList.add('sel');
-      selectedSev = btn.dataset.sev as 'blocking' | 'important' | 'suggestion';
     });
   });
 
@@ -1108,7 +1090,8 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
       const list: SwAnnotation[] = result.smartwriterAnnotations || [];
       const idx = list.findIndex(a => a.id === ann.id);
       if (idx >= 0) {
-        list[idx] = { ...list[idx], type: selectedType, severity: selectedSev, note };
+        const { severity: _severity, ...cleanAnnotation } = list[idx] as SwAnnotation & { severity?: unknown };
+        list[idx] = { ...cleanAnnotation, type: selectedType, note };
         chrome.storage.local.set({ smartwriterAnnotations: list }, () => swRefreshMarkers());
       }
     });
@@ -1255,7 +1238,6 @@ interface SwAnnotation {
   url: string;
   timestamp: string;
   type: 'change' | 'step' | 'bug';
-  severity?: 'blocking' | 'important' | 'suggestion';
   note: string;
   stepNumber?: number;
   selectors: SwAnnotationSelectors;
@@ -1351,12 +1333,6 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
           <button class="__sw_pill__ __sw_pbug__" data-type="bug">🐛 Bug</button>
           <button class="__sw_pill__ __sw_pchg__" data-type="change">✏️ Change</button>
         </div>
-        <div class="__sw_fl__">Severity</div>
-        <div class="__sw_pills__" id="__sw_sev_pills__">
-          <button class="__sw_pill__ __sw_pimp__ sel" data-sev="important">⚠️ Important</button>
-          <button class="__sw_pill__ __sw_pblk__" data-sev="blocking">⛔ Blocking</button>
-          <button class="__sw_pill__ __sw_psug__" data-sev="suggestion">💡 Suggestion</button>
-        </div>
         <div class="__sw_pfoot__">
           <button class="__sw_fpb__ __sw_fpc__" id="__sw_cancel_btn__">Cancel</button>
           <button class="__sw_fpb__ __sw_fps__" id="__sw_save_btn__">Save <kbd>Ctrl+↵</kbd></button>
@@ -1377,7 +1353,6 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
     document.addEventListener('keydown', escHandler);
 
     let selectedType: 'change' | 'step' | 'bug' = 'step';
-    let selectedSev: 'blocking' | 'important' | 'suggestion' = 'important';
 
     popup.querySelectorAll<HTMLElement>('#__sw_type_pills__ .__sw_pill__').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1385,14 +1360,6 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
         btn.classList.add('sel');
         selectedType = btn.dataset.type as 'change' | 'step' | 'bug';
         document.getElementById('__sw_si__')!.classList.toggle('show', selectedType === 'step');
-      });
-    });
-
-    popup.querySelectorAll<HTMLElement>('#__sw_sev_pills__ .__sw_pill__').forEach(btn => {
-      btn.addEventListener('click', () => {
-        popup.querySelectorAll('#__sw_sev_pills__ .__sw_pill__').forEach(b => b.classList.remove('sel'));
-        btn.classList.add('sel');
-        selectedSev = btn.dataset.sev as 'blocking' | 'important' | 'suggestion';
       });
     });
 
@@ -1410,7 +1377,6 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
         url: window.location.href,
         timestamp: new Date().toISOString(),
         type: selectedType,
-        severity: selectedSev,
         note,
         stepNumber: nextStep,
         selectors,
@@ -1463,3 +1429,9 @@ chrome.runtime
 chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' })
   .then((resp: any) => { if (resp?.active) injectTrackingWidget(); })
   .catch(() => {});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes.smartwriterAnnotations) return;
+  if (!document.getElementById('__sw_launcher__')) return;
+  swRefreshMarkers();
+});

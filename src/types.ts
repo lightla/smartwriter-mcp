@@ -36,6 +36,8 @@ export interface BrowserAction {
   value?: string;
   url?: string;
   script?: string;
+  marker?: string;
+  index?: number;
   args?: unknown[];
   timeout?: number;
   key?: string;

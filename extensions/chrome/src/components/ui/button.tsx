@@ -8,11 +8,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-amber-700 text-stone-100 hover:bg-amber-800',
-        destructive: 'bg-rose-700 text-stone-100 hover:bg-rose-800',
-        outline: 'border border-stone-600 bg-stone-700 text-stone-100 hover:bg-stone-600',
-        secondary: 'bg-stone-600 text-stone-100 hover:bg-stone-500',
-        ghost: 'text-stone-400 hover:bg-stone-700 hover:text-stone-100',
+        default: 'border border-amber-700/50 bg-amber-900/40 text-amber-500 hover:bg-amber-900/60',
+        destructive: 'border border-rose-700/50 bg-rose-900/40 text-rose-500 hover:bg-rose-900/60',
+        outline: 'border border-stone-700 bg-stone-800 text-stone-400 hover:bg-stone-700',
+        secondary: 'bg-stone-800 text-stone-400 hover:bg-stone-700',
+        ghost: 'text-stone-500 hover:bg-stone-800 hover:text-stone-400',
         success: 'border border-teal-600 bg-teal-800 text-teal-100 hover:bg-teal-700',
       },
       size: {

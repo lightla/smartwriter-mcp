@@ -501,17 +501,17 @@ const TRACKING_CSS = `
 .__sw_marker__ {
   position: fixed; z-index: 2147483644;
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 4px 8px 4px 6px; border-radius: 7px;
-  font-size: 10px; font-weight: 800;
+  padding: 4px 10px 4px 8px; border-radius: 9px;
+  font-size: 12px; font-weight: 800;
   font-family: -apple-system, sans-serif;
   cursor: pointer; box-shadow: 0 5px 16px rgba(36,26,16,0.32);
   transition: transform 0.1s; white-space: nowrap; pointer-events: auto;
   transform-origin: left bottom;
 }
 .__sw_marker__:hover { transform: scale(1.12); }
-.__sw_mk_step__   { background: #292524; color: #f59e0b; outline: 1px solid #b45309; }
-.__sw_mk_change__ { background: #292524; color: #14b8a6; outline: 1px solid #0f766e; }
-.__sw_mk_bug__  { background: #292524; color: #f43f5e; outline: 1px solid #e11d48; }
+.__sw_mk_step__   { background: #451a03; color: #d97706; }
+.__sw_mk_change__ { background: #042f2e; color: #2dd4bf; }
+.__sw_mk_bug__  { background: #4c0519; color: #e11d48; }
 .__sw_mk_dot__ { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 /* ── Marker tooltip ── */
 .__sw_mtip__ {
@@ -612,6 +612,7 @@ const TRACKING_CSS = `
   font-family: inherit; transition: all 0.12s; outline: none;
 }
 .__sw_pill__:hover { border-color: rgba(214,200,181,0.36); color: #a8a29e; }
+.__sw_pill__ kbd { font-family: monospace; font-size: 9px; font-weight: 700; background: rgba(200,200,200,0.15); border-radius: 3px; padding: 1px 4px; margin-left: 2px; }
 .__sw_pchg__.sel  { border-color: #0d9488; background: rgba(13,148,136,0.15); color: #0d9488; }
 .__sw_pstep__.sel { border-color: #d97706; background: rgba(217,119,6,0.15); color: #d97706; }
 .__sw_pbug__.sel  { border-color: #e11d48; background: rgba(225,29,72,0.15); color: #e11d48; }
@@ -1024,6 +1025,9 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
   const escHandler = (e: KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); closePopup(); }
     if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); document.getElementById('__sw_save_btn__')?.click(); }
+    if (e.key === 'F1') { e.preventDefault(); (popup.querySelector('.__sw_pstep__') as HTMLElement)?.click(); }
+    if (e.key === 'F2') { e.preventDefault(); (popup.querySelector('.__sw_pbug__') as HTMLElement)?.click(); }
+    if (e.key === 'F3') { e.preventDefault(); (popup.querySelector('.__sw_pchg__') as HTMLElement)?.click(); }
   };
 
   const bc = ann.selectors.primary + (ann.framework?.componentName ? ` · ${ann.framework.componentName}` : '');
@@ -1039,9 +1043,9 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
       <textarea class="__sw_ta__" id="__sw_note_text__" placeholder="Describe the issue...">${swEscHtml(ann.note)}</textarea>
       <div class="__sw_fl__">Type</div>
       <div class="__sw_pills__" id="__sw_type_pills__">
-        <button class="__sw_pill__ __sw_pstep__${ann.type === 'step' ? ' sel' : ''}" data-type="step"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="m9 12 2 2 4-4"/></svg> Step</button>
-        <button class="__sw_pill__ __sw_pbug__${ann.type === 'bug' ? ' sel' : ''}" data-type="bug"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c-2 2.1-3.6 3.8-5.53 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg> Bug</button>
-        <button class="__sw_pill__ __sw_pchg__${ann.type === 'change' ? ' sel' : ''}" data-type="change"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Change</button>
+        <button class="__sw_pill__ __sw_pstep__${ann.type === 'step' ? ' sel' : ''}" data-type="step"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="m9 12 2 2 4-4"/></svg> Step <kbd>F1</kbd></button>
+        <button class="__sw_pill__ __sw_pbug__${ann.type === 'bug' ? ' sel' : ''}" data-type="bug"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c-2 2.1-3.6 3.8-5.53 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg> Bug <kbd>F2</kbd></button>
+        <button class="__sw_pill__ __sw_pchg__${ann.type === 'change' ? ' sel' : ''}" data-type="change"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Change <kbd>F3</kbd></button>
       </div>
       <div class="__sw_pfoot__">
         <button class="__sw_fpb__ __sw_fdel__" id="__sw_delete_btn__"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button>
@@ -1318,6 +1322,9 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
     const escHandler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); closePopup(); }
       if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); document.getElementById('__sw_save_btn__')?.click(); }
+      if (e.key === 'F1') { e.preventDefault(); (popup.querySelector('.__sw_pstep__') as HTMLElement)?.click(); }
+      if (e.key === 'F2') { e.preventDefault(); (popup.querySelector('.__sw_pbug__') as HTMLElement)?.click(); }
+      if (e.key === 'F3') { e.preventDefault(); (popup.querySelector('.__sw_pchg__') as HTMLElement)?.click(); }
     };
 
     popup.innerHTML = `
@@ -1331,9 +1338,9 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
         <textarea class="__sw_ta__" id="__sw_note_text__" placeholder="Describe the issue..."></textarea>
         <div class="__sw_fl__">Type</div>
         <div class="__sw_pills__" id="__sw_type_pills__">
-          <button class="__sw_pill__ __sw_pstep__ sel" data-type="step"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="m9 12 2 2 4-4"/></svg> Step</button>
-          <button class="__sw_pill__ __sw_pbug__" data-type="bug"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c-2 2.1-3.6 3.8-5.53 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg> Bug</button>
-          <button class="__sw_pill__ __sw_pchg__" data-type="change"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Change</button>
+          <button class="__sw_pill__ __sw_pstep__ sel" data-type="step"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="m9 12 2 2 4-4"/></svg> Step <kbd>F1</kbd></button>
+          <button class="__sw_pill__ __sw_pbug__" data-type="bug"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c-2 2.1-3.6 3.8-5.53 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg> Bug <kbd>F2</kbd></button>
+          <button class="__sw_pill__ __sw_pchg__" data-type="change"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Change <kbd>F3</kbd></button>
         </div>
         <div class="__sw_pfoot__">
           <button class="__sw_fpb__ __sw_fpc__" id="__sw_cancel_btn__">Cancel</button>

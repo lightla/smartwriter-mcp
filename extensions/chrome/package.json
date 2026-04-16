@@ -12,15 +12,29 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --minify && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
-    "build:dev": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --sourcemap && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
-    "watch": "tsup src/background.ts src/content.ts src/popup.ts --format iife --splitting false --target es2022 --outDir dist --watch --sourcemap && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
+    "build:css": "mkdir -p dist && tailwindcss -i ./src/popup.css -o ./dist/popup.css --minify && perl -0pi -e 's/#fff\\b/#e8e5e0/g' dist/popup.css",
+    "build:css:dev": "mkdir -p dist && tailwindcss -i ./src/popup.css -o ./dist/popup.css && perl -0pi -e 's/#fff\\b/#e8e5e0/g' dist/popup.css",
+    "build": "pnpm run build:css && NODE_ENV=production tsup src/background.ts src/content.ts src/popup.tsx --format iife --splitting false --target es2022 --outDir dist --minify --replaceNodeEnv && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
+    "build:dev": "pnpm run build:css:dev && NODE_ENV=development tsup src/background.ts src/content.ts src/popup.tsx --format iife --splitting false --target es2022 --outDir dist --sourcemap --replaceNodeEnv && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png",
+    "watch": "NODE_ENV=development tsup src/background.ts src/content.ts src/popup.tsx --format iife --splitting false --target es2022 --outDir dist --sourcemap --replaceNodeEnv --watch --onSuccess \"pnpm run build:css:dev && mv dist/background.global.js dist/background.js && mv dist/content.global.js dist/content.js && mv dist/popup.global.js dist/popup.js && cp src/popup.html dist/popup.html && cp manifest.json dist/manifest.json && cp src/icon-on.png dist/icon-on.png && cp src/icon-off.png dist/icon-off.png\"",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
-  "dependencies": {},
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
     "@types/chrome": "^0.0.268",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.10",
+    "tailwindcss": "^4.2.2",
     "tsup": "^8.4.0",
     "typescript": "^5.6.2"
   }

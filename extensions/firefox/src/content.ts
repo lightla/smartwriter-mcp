@@ -201,7 +201,7 @@ async function takeScreenshot(): Promise<unknown> {
   canvas.height = rect.height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not get canvas context');
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = '#f3f0eb';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/png');
   return { dataUrl, width: canvas.width, height: canvas.height };

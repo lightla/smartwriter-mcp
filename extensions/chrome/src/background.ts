@@ -551,8 +551,8 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
             dot.id = DOT_ID;
             Object.assign(dot.style, {
               position: 'fixed', width: '20px', height: '20px', borderRadius: '50%',
-              background: 'rgba(99,102,241,0.85)', border: '2px solid white',
-              boxShadow: '0 0 8px rgba(99,102,241,0.6)',
+              background: 'rgba(146,64,14,0.88)', border: '2px solid #f3eadb',
+              boxShadow: '0 0 8px rgba(146,64,14,0.55)',
               pointerEvents: 'none', zIndex: '2147483647',
               transform: 'translate(-50%,-50%)',
               transition: 'left 0.1s ease, top 0.1s ease',

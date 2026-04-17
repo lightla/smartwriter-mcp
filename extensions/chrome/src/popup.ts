@@ -39,13 +39,13 @@ function renderServers(servers: ServerStatus[]) {
     let descColor: string;
     if (srv.wsStatus === 'connected') {
       descText = `Connected · ws://localhost:${srv.port}`;
-      descColor = '#16a34a';
+      descColor = '#12613b';
     } else if (srv.wsStatus === 'connecting') {
       descText = `Connecting · ws://localhost:${srv.port}`;
-      descColor = '#2563eb';
+      descColor = '#8a5a00';
     } else {
       descText = `Waiting · ws://localhost:${srv.port}`;
-      descColor = '#d97706';
+      descColor = '#8a5a00';
     }
     return `
       <div class="status-row">

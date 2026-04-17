@@ -13,6 +13,7 @@ import {
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { cn } from './lib/utils';
+import { theme } from './theme';
 
 interface ServerStatus {
   port: number;
@@ -31,20 +32,20 @@ type EditableServer = Pick<ServerStatus, 'port' | 'name'>;
 const statusMeta = {
   connected: {
     label: 'Connected',
-    dotClass: 'bg-teal-500',
-    textClass: 'text-teal-700',
+    dotClass: theme.dotConnected,
+    textClass: theme.textSuccess,
     icon: Wifi,
   },
   connecting: {
     label: 'Connecting',
-    dotClass: 'bg-amber-500 animate-pulse',
-    textClass: 'text-amber-700',
+    dotClass: theme.dotConnecting,
+    textClass: theme.textWarning,
     icon: Loader2,
   },
   waiting: {
     label: 'Waiting',
-    dotClass: 'bg-amber-500 animate-pulse',
-    textClass: 'text-amber-700',
+    dotClass: theme.dotWaiting,
+    textClass: theme.textWarning,
     icon: WifiOff,
   },
 } satisfies Record<ServerStatus['wsStatus'], {
@@ -70,7 +71,7 @@ function isValidPort(value: number): boolean {
 function ServerStatusList({ servers }: { servers: ServerStatus[] }) {
   if (servers.length === 0) {
     return (
-      <div className="px-3 py-3 text-sm text-stone-400">
+      <div className={cn('px-3 py-3 text-sm', theme.textMuted)}>
         No servers configured. Add one in settings.
       </div>
     );
@@ -87,7 +88,7 @@ function ServerStatusList({ servers }: { servers: ServerStatus[] }) {
           <div className="flex min-w-0 items-center gap-3" key={server.port}>
             <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', meta.dotClass)} />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-stone-400">{label}</div>
+              <div className={cn('truncate text-sm font-semibold', theme.textSecondary)}>{label}</div>
               <div className={cn('mt-0.5 flex min-w-0 items-center gap-1.5 text-xs', meta.textClass)}>
                 <Icon className={cn('h-3.5 w-3.5 shrink-0', server.wsStatus === 'connecting' && 'animate-spin')} />
                 <span className="truncate">
@@ -199,7 +200,7 @@ function ServerEditor({
     >
       <Input
         aria-label={`Port ${server.port}`}
-        className={cn('h-8 px-2 text-xs', !editing && 'bg-stone-800 text-stone-400 shadow-none border-stone-700')}
+        className={cn('h-8 px-2 text-xs', !editing && 'bg-[#cee1de] text-[#405551] shadow-none border-[#9eb8b3]')}
         min={1024}
         max={65535}
         onClick={() => startEdit('port')}
@@ -213,7 +214,7 @@ function ServerEditor({
       />
       <Input
         aria-label={`Name for port ${server.port}`}
-        className={cn('h-8 min-w-0 px-2 text-xs', !editing && 'bg-stone-800 text-stone-400 shadow-none border-stone-700')}
+        className={cn('h-8 min-w-0 px-2 text-xs', !editing && 'bg-[#cee1de] text-[#405551] shadow-none border-[#9eb8b3]')}
         onClick={() => startEdit('name')}
         onChange={(event) => setNameValue(event.target.value)}
         onKeyDown={handleKeyDown}
@@ -226,7 +227,7 @@ function ServerEditor({
       />
       <Button
         aria-label={`Remove port ${server.port}`}
-        className="text-stone-400 hover:bg-rose-900 hover:text-rose-300"
+        className="text-[#4f625e] hover:bg-[#ddb8b2] hover:text-[#842a27]"
         onClick={() => onRemove(server.port)}
         size="icon"
         type="button"
@@ -274,11 +275,11 @@ function SettingsPanel({
   };
 
   return (
-    <section className="border-b border-stone-700 bg-stone-800 px-3 py-3">
+    <section className={theme.section}>
       <div className="mb-2 flex items-center justify-between">
         <div>
-          <div className="text-sm font-semibold text-amber-600">MCP Servers</div>
-          <div className="text-xs text-stone-500">Click a row to edit.</div>
+          <div className={cn('text-sm font-semibold', theme.textAccent)}>MCP Servers</div>
+          <div className={cn('text-xs', theme.textFaint)}>Click a row to edit.</div>
         </div>
       </div>
 
@@ -321,7 +322,7 @@ function SettingsPanel({
         </Button>
       </form>
 
-      {error && <div className="mt-2 text-xs text-rose-600">{error}</div>}
+      {error && <div className={cn('mt-2 text-xs', theme.textDanger)}>{error}</div>}
     </section>
   );
 }
@@ -343,9 +344,9 @@ function TabControls({
 }) {
   if (!currentStatus) {
     return (
-      <section className="border-t border-stone-700 bg-stone-800 px-3 py-3">
-        <div className="h-4 w-40 animate-pulse rounded bg-stone-700" />
-        <div className="mt-3 h-9 w-full animate-pulse rounded-md bg-stone-700" />
+      <section className={theme.sectionAlt}>
+        <div className={cn('h-4 w-40', theme.skeleton)} />
+        <div className={cn('mt-3 h-9 w-full rounded-md', theme.skeleton)} />
       </section>
     );
   }
@@ -359,15 +360,15 @@ function TabControls({
       : activeTab?.title || 'Current tab';
 
   return (
-    <section className="border-t border-stone-700 bg-[#35302e] px-3 py-3">
+    <section className={theme.sectionAlt}>
       <div className="mb-2 flex items-start gap-2">
-        <MousePointerClick className={cn('mt-0.5 h-4 w-4 shrink-0', isCurrentTabConnected ? 'text-teal-400' : 'text-stone-500')} />
+        <MousePointerClick className={cn('mt-0.5 h-4 w-4 shrink-0', isCurrentTabConnected ? theme.textSuccess : theme.textFaint)} />
         <div className="min-w-0">
-          <div className={cn('truncate text-sm font-medium', isCurrentTabConnected ? 'text-teal-400' : 'text-stone-400')} title={title}>
+          <div className={cn('truncate text-sm font-medium', isCurrentTabConnected ? theme.textSuccess : theme.textSecondary)} title={title}>
             {title}
           </div>
           {hasConnectedTab && !isCurrentTabConnected && (
-            <div className="mt-0.5 text-xs text-stone-500">Another tab is connected.</div>
+            <div className={cn('mt-0.5 text-xs', theme.textMuted)}>Another tab is connected.</div>
           )}
         </div>
       </div>
@@ -398,7 +399,7 @@ function TabControls({
             {currentStatus.trackingActive ? 'Tracking On' : 'Tracking Off'}
           </Button>
           {currentStatus.trackingActive && (
-            <div className="mt-2 text-center text-xs text-stone-400">
+            <div className={cn('mt-2 text-center text-xs', theme.textMuted)}>
               Click elements on the page to capture annotations.
             </div>
           )}
@@ -501,15 +502,15 @@ function PopupApp() {
   }, []);
 
   return (
-    <div className="w-[280px] overflow-hidden rounded-none bg-stone-900 text-stone-400 shadow-none">
-      <header className="flex items-center justify-between bg-stone-950 px-3 py-2.5 text-amber-600">
+    <div className={theme.popup}>
+      <header className={theme.header}>
         <div>
-          <div className="text-sm font-bold leading-5">Smartwriter MCP</div>
-          <div className="text-xs text-stone-400">Browser bridge</div>
+          <div className={theme.headerTitle}>Smartwriter MCP</div>
+          <div className={theme.headerSub}>Browser bridge</div>
         </div>
         <Button
           aria-label="Settings"
-          className="text-stone-500 hover:bg-stone-800 hover:text-amber-500"
+          className={cn('hover:bg-[#cee1de]', theme.textMuted, 'hover:text-[#102221]')}
           onClick={() => setSettingsOpen((open) => !open)}
           size="icon"
           type="button"
@@ -529,7 +530,7 @@ function PopupApp() {
       )}
 
       {loadError ? (
-        <div className="bg-stone-900 px-3 py-3 text-sm text-rose-400">{loadError}</div>
+        <div className={cn('bg-[#ddb8b2] px-3 py-3 text-sm', theme.textDanger)}>{loadError}</div>
       ) : (
         <ServerStatusList servers={status?.servers ?? []} />
       )}

@@ -4,21 +4,21 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-100 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#116466] focus-visible:ring-offset-2 focus-visible:ring-offset-[#cee1de] disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
       variant: {
-        default: 'border border-amber-700/50 bg-amber-900/40 text-amber-500 hover:bg-amber-900/60',
-        destructive: 'border border-rose-700/50 bg-rose-900/40 text-rose-500 hover:bg-rose-900/60',
-        outline: 'border border-teal-700/50 bg-teal-900/30 text-teal-400 hover:bg-teal-700/60',
-        secondary: 'border border-amber-700/50 bg-amber-950/30 text-amber-500/80 hover:bg-amber-900/40',
-        ghost: 'text-stone-500 hover:bg-stone-800 hover:text-stone-400',
-        success: 'border border-amber-500/70 bg-amber-800/40 text-amber-300 hover:bg-amber-700/50',
+        default:     'border border-[#116466]/40 bg-[#a6d0c4] text-[#0b4546] hover:bg-[#a9cec4]',
+        destructive: 'border border-[#b54a43]/40 bg-[#ddb8b2] text-[#842a27] hover:bg-[#ddb5af]',
+        outline:     'border border-[#168a55]/40 bg-[#b0d6be] text-[#0f5634] hover:bg-[#b5d7c4]',
+        secondary:   'border border-[#9eb8b3] bg-[#cee1de] text-[#233c39] hover:bg-[#b8ceca]',
+        ghost:       'text-[#405551] hover:bg-[#cee1de] hover:text-[#102221]',
+        success:     'border border-[#168a55]/45 bg-[#b0d6be] text-[#0f5634] hover:bg-[#b5d7c4]',
       },
       size: {
         default: 'h-10 px-4 py-2',
-        sm: 'h-8 px-3 text-xs',
-        icon: 'h-8 w-8',
+        sm:      'h-8 px-3 text-xs',
+        icon:    'h-8 w-8',
       },
     },
     defaultVariants: {

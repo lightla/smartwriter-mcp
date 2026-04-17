@@ -1131,6 +1131,7 @@ function swAddMarker(ann: SwAnnotation): void {
   const marker = document.createElement('div');
   marker.className = `__sw_marker__ __sw_mk_${ann.type}__`;
   marker.dataset.annId = ann.id;
+  marker.title = `Edit (Click) | Jump to target (${navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'} + Click)`;
   const prefix = `#${ann.stepNumber ?? '?'}`;
   marker.innerHTML = `<span class="__sw_mk_dot__"></span>${prefix}`;
 
@@ -1176,8 +1177,24 @@ function swAddMarker(ann: SwAnnotation): void {
 
   marker.addEventListener('click', (e) => {
     e.stopPropagation();
-    const mr = marker.getBoundingClientRect();
-    showEditPopup(ann, mr.right + 6, mr.top);
+    if (e.ctrlKey || e.metaKey) {
+      // SCIENTIFIC NAVIGATION: Jump to the target element
+      let target: Element | null = null;
+      try { target = document.querySelector(ann.selectors.primary); } catch (_) {}
+      if (!target) {
+        try { target = document.querySelector(ann.selectors.cssPath); } catch (_) {}
+      }
+      
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        swShowToast(`Jumped to #${ann.stepNumber}`);
+      } else {
+        swShowToast(`Target element for #${ann.stepNumber} not found`);
+      }
+    } else {
+      const mr = marker.getBoundingClientRect();
+      showEditPopup(ann, mr.right + 6, mr.top);
+    }
   });
 
   document.body.appendChild(marker);

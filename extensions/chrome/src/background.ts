@@ -770,7 +770,17 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     }
     sendResponse({ success: true, active: trackingTabIds.has(currentTabId) });
   } else if (request.type === 'CONNECT_TAB') {
+    const oldTabId = currentTabId;
     currentTabId = request.tabId;
+    
+    // If we changed tabs, stop tracking in the old tab
+    if (oldTabId && oldTabId !== currentTabId) {
+      if (trackingTabIds.has(oldTabId)) {
+        trackingTabIds.delete(oldTabId);
+        chrome.tabs.sendMessage(oldTabId, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
+      }
+    }
+
     if (currentTabId) {
       chrome.storage.local.set({ smartwriterTabId: currentTabId });
     } else {

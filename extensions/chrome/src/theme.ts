@@ -32,6 +32,12 @@ export const theme = {
   dotConnecting: 'bg-[#c17a00] animate-pulse',
   dotWaiting: 'bg-[#c17a00] animate-pulse',
 
+  // Cards & Widgets
+  cardBg: 'bg-[#d8e8e5]',
+  cardBorder: 'border-[#abbdb8]',
+  iconMuted: 'bg-[#b8ccca] text-[#405551]',
+  text: 'text-[#102221]',
+
   // Skeleton
   skeleton: 'animate-pulse rounded bg-[#d1dad4]',
 } as const;

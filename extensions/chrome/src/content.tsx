@@ -1,5 +1,7 @@
 import type { ContentMessage, ContentResponse } from './types';
 
+
+
 chrome.runtime.onMessage.addListener(
   (message: ContentMessage, sender, sendResponse: (response: ContentResponse) => void) => {
     handleMessage(message, sendResponse).catch((error) => {
@@ -78,7 +80,12 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         result = { unregistered: true };
         break;
       case 'TOGGLE_TRACKING':
-        result = handleToggleTracking(message.active);
+        result = handleToggleTracking(message.active, message.flowMarker);
+        break;
+      case 'TAB_FLOW_STATE_CHANGE':
+        swTabFlowEnabled = !!message.enabled;
+        syncWidgetVisibility(message.flowMarker);
+        result = { success: true };
         break;
       default:
         throw new Error(`Unknown message type: ${(message as any).type}`);
@@ -418,17 +425,26 @@ function delay(ms: number): Promise<void> {
 // ==================== TRACKING SYSTEM ====================
 
 const TRACKING_CSS = `
-/* ── Launcher: rounded square icon, bottom-right ── */
+/* ── Launcher Container: bottom-right ── */
 #__sw_launcher__ {
   position: fixed;
   bottom: 20px;
   right: 20px;
   z-index: 2147483645;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  font-family: -apple-system, sans-serif;
+}
+
+/* ── Main Launcher Button ── */
+#__sw_launcher_btn__ {
   width: 52px;
   height: 52px;
   border-radius: 14px;
   background: #cee1de;
-  border: 1px solid #aebdb5;
+  border: 1px solid #116466;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -436,10 +452,12 @@ const TRACKING_CSS = `
   box-shadow: 0 10px 30px rgba(31,42,42,0.22);
   transition: transform 0.15s, background 0.15s, border-color 0.15s;
   outline: none;
+  pointer-events: auto;
+  position: relative;
 }
-#__sw_launcher__:hover { transform: scale(1.06); background: #b8ceca; border-color: #116466; }
-#__sw_launcher__.picking { background: #a6d0c4; border-color: #116466; }
-#__sw_launcher__ { cursor: pointer !important; }
+#__sw_launcher_btn__:hover { transform: scale(1.06); background: #b8ceca; border-color: #116466; }
+#__sw_launcher_btn__.picking { background: #a6d0c4; border-color: #116466; }
+
 /* ── Vertical panel ── */
 #__sw_panel__ {
   position: fixed;
@@ -486,7 +504,7 @@ const TRACKING_CSS = `
   display: flex; align-items: center; justify-content: center;
   color: #405551; transition: background 0.12s, color 0.12s; outline: none;
 }
-.__sw_pb__:hover { background: #cee1de; color: #102221; }
+.__sw_pb__:hover { background: #b8ceca; color: #102221; }
 .__sw_pb__.active { background: #a6d0c4; color: #0f4f50; }
 .__sw_pb__.danger:hover { background: #ddb8b2; color: #842a27; }
 .__sw_pb__.confirm { background: #ddb5af; color: #842a27; }
@@ -678,6 +696,31 @@ const TRACKING_CSS = `
   pointer-events: none;
 }
 #__sw_badge__.show { display: flex; }
+
+/* ── Tab Flow UI ── */
+#__sw_flow_link_btn__, #__sw_flow_id__ {
+  width: 36px; height: 36px;
+  background: #cee1de;
+  border: 1.5px solid #9eb8b3;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(31,42,42,0.12);
+  margin-bottom: 8px;
+  pointer-events: auto;
+}
+#__sw_flow_link_btn__.active, #__sw_flow_id__ {
+  background: #a6d0c4;
+  border-color: #116466;
+  box-shadow: 0 4px 12px rgba(17, 100, 102, 0.3);
+}
+#__sw_flow_id__ {
+  color: #0f4f50; font-size: 11px; font-weight: 800;
+}
+#__sw_flow_link_btn__ svg { width: 18px; height: 18px; stroke: #405551; transition: all 0.2s; }
+#__sw_flow_link_btn__.active svg { stroke: #0f4f50; transform: rotate(45deg); }
+#__sw_flow_link_btn__:hover, #__sw_flow_id__:hover { border-color: #116466; background: #b8ceca; }
 `;
 
 // SVG icons (feather-style)
@@ -686,6 +729,9 @@ const SW_SVG_PICK = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none"
 const SW_SVG_EYE = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const SW_SVG_EYEOFF = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 const SW_SVG_TRASH = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+const SW_SVG_TRASH_ALL = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`;
+const SW_SVG_SHIELD = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`;
+const SW_SVG_CONNECT = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
 
 let swTrackingActive = false;
 let swPickingElement = false;
@@ -695,55 +741,178 @@ let swActiveTip: HTMLElement | null = null;
 let swScrollTimer: ReturnType<typeof setTimeout> | null = null;
 let swClearConfirm = false;
 let swClearTimer: ReturnType<typeof setTimeout> | null = null;
-let swFocusModeOn = true;
+let swFocusModeOn = false; // Default OFF as requested
 let swMarkerFocusEl: HTMLElement | null = null;
+let swTabFlowEnabled = false; // Master Switch State
 
-function handleToggleTracking(active: boolean): unknown {
+function handleToggleTracking(active: boolean, flowMarker?: string): unknown {
   swTrackingActive = active;
-  if (active) {
-    injectTrackingWidget();
-  } else {
-    removeTrackingWidget();
-  }
+  // In Scientific UI, we sync visibility state
+  syncWidgetVisibility(flowMarker);
   return { tracking: active };
 }
 
-function injectTrackingWidget(): void {
-  if (document.getElementById('__sw_launcher__')) return;
+/**
+ * Centrally manages whether the widget should be on-screen.
+ */
+function syncWidgetVisibility(flowMarker?: string): void {
+  const shouldBeVisible = swTrackingActive || swTabFlowEnabled;
+  if (shouldBeVisible) {
+    injectTrackingWidget(flowMarker);
+  } else {
+    removeTrackingWidget();
+  }
+}
 
+/**
+ * Scientific UI Management: Ensures the core widget structure exists exactly once.
+ */
+function getOrInitializeWidget(): HTMLElement {
+  let container = document.getElementById('__sw_launcher__');
+  if (container) return container;
+
+  // 1. Inject Styles
   const style = document.createElement('style');
   style.id = '__sw_tracker_styles__';
   style.textContent = TRACKING_CSS;
   document.head.appendChild(style);
 
-  const launcher = document.createElement('button');
-  launcher.id = '__sw_launcher__';
-  launcher.title = 'Smartwriter Tracker';
-  launcher.innerHTML = SW_SVG_LAYERS + '<span id="__sw_badge__"></span>';
-  document.body.appendChild(launcher);
+  // 2. Create Container
+  container = document.createElement('div');
+  container.id = '__sw_launcher__';
+  document.body.appendChild(container);
 
-  // Vertical panel
+  // 3. Main Launcher Button
+  const launcherBtn = document.createElement('button');
+  launcherBtn.id = '__sw_launcher_btn__';
+  launcherBtn.title = 'Smartwriter Tracker';
+  launcherBtn.innerHTML = SW_SVG_LAYERS + '<span id="__sw_badge__"></span>';
+  container.appendChild(launcherBtn);
+
+  // 4. Vertical Panel
   const panel = document.createElement('div');
   panel.id = '__sw_panel__';
   panel.innerHTML = `
     <div class="__sw_ph__">
       <span class="__sw_ph_name__">Track</span>
     </div>
-    <button class="__sw_pb__ __sw_pb_focus__ active" id="__sw_pick_btn__" title="Focus mode ON">${SW_SVG_PICK}<span class="__sw_pb_hint__">ESC</span></button>
+    <button class="__sw_pb__ __sw_pb_focus__${swFocusModeOn ? ' active' : ''}" id="__sw_pick_btn__" title="Focus mode ${swFocusModeOn ? 'ON' : 'OFF'}">${SW_SVG_PICK}<span class="__sw_pb_hint__">ESC</span></button>
     <div class="__sw_divider__"></div>
-    <button class="__sw_pb__ active" id="__sw_eye_btn__" title="Toggle markers">${SW_SVG_EYE}</button>
+    <button class="__sw_pb__${swMarkersVisible ? ' active' : ''}" id="__sw_eye_btn__" title="Toggle markers">${swMarkersVisible ? SW_SVG_EYE : SW_SVG_EYEOFF}</button>
     <div class="__sw_divider__"></div>
+    <button class="__sw_pb__ danger" id="__sw_del_all_btn__" title="Delete ALL annotations (global)">${SW_SVG_TRASH_ALL}</button>
     <button class="__sw_pb__ danger" id="__sw_del_btn__" title="Clear page annotations">${SW_SVG_TRASH}</button>
   `;
   document.body.appendChild(panel);
 
-  // Pick/focus mode toggle button
-  document.getElementById('__sw_pick_btn__')!.addEventListener('click', (e) => {
+  // 5. Unified Event Listeners
+  setupWidgetListeners(container, launcherBtn, panel);
+
+  return container;
+}
+
+/**
+ * Reconciles the Tab Flow UI elements based on the current state.
+ */
+function syncTabFlowUI(marker?: string): void {
+  const container = document.getElementById('__sw_launcher__');
+  if (!container) return;
+
+  const flowEl = document.getElementById('__sw_flow_id__');
+  const flowLinkBtn = document.getElementById('__sw_flow_link_btn__');
+
+  // Logic Table:
+  // TabFlow OFF -> Remove all flow elements
+  // TabFlow ON + Has Marker -> Show Marker ID, Remove Link Button
+  // TabFlow ON + No Marker -> Show Link Button, Remove Marker ID
+
+  if (!swTabFlowEnabled) {
+    flowEl?.remove();
+    flowLinkBtn?.remove();
+    return;
+  }
+
+  if (marker) {
+    flowLinkBtn?.remove();
+    if (flowEl) {
+      flowEl.textContent = marker;
+    } else {
+      const newFlowEl = document.createElement('div');
+      newFlowEl.id = '__sw_flow_id__';
+      newFlowEl.textContent = marker;
+      newFlowEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chrome.runtime.sendMessage({ type: 'TOGGLE_FLOW_TAB', tabId: null });
+      });
+      container.prepend(newFlowEl);
+    }
+  } else {
+    flowEl?.remove();
+    if (!flowLinkBtn) {
+      const newLinkBtn = document.createElement('div');
+      newLinkBtn.id = '__sw_flow_link_btn__';
+      newLinkBtn.title = 'Connect this tab to Flow';
+      newLinkBtn.innerHTML = SW_SVG_CONNECT;
+      newLinkBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chrome.runtime.sendMessage({ type: 'TOGGLE_FLOW_TAB', tabId: null });
+      });
+      container.prepend(newLinkBtn);
+    }
+  }
+}
+
+/**
+ * Higher-level entry point that orchestrates UI injection.
+ */
+function injectTrackingWidget(flowMarker?: string): void {
+  getOrInitializeWidget();
+  syncTabFlowUI(flowMarker);
+
+  const launcherBtn = document.getElementById('__sw_launcher_btn__');
+  const panel = document.getElementById('__sw_panel__');
+
+  // Logic: Launcher button and Panel are visible ONLY IF tracking is active
+  // Connect/Flow elements (Mắt xích/Flow ID) are handled separately in syncTabFlowUI
+  if (launcherBtn) {
+    launcherBtn.style.display = swTrackingActive ? 'flex' : 'none';
+  }
+  
+  if (!swTrackingActive && panel) {
+    panel.classList.remove('visible');
+  }
+
+  // Always sync picker state locally
+  const pickBtn = document.getElementById('__sw_pick_btn__');
+  if (pickBtn) {
+    pickBtn.classList.toggle('active', swFocusModeOn);
+    pickBtn.title = `Focus mode ${swFocusModeOn ? 'ON' : 'OFF'}`;
+  }
+}
+
+/**
+ * Organizes all event handlers to keep injectTrackingWidget clean.
+ */
+function setupWidgetListeners(container: HTMLElement, launcherBtn: HTMLButtonElement, panel: HTMLElement): void {
+  // Panel toggler
+  launcherBtn.addEventListener('click', (e: MouseEvent) => {
+    e.stopPropagation();
+    const isVisible = panel.classList.contains('visible');
+    if (!isVisible) {
+      cancelPickingElement();
+      panel.classList.add('visible');
+    } else {
+      panel.classList.remove('visible');
+      if (swFocusModeOn) startPickingElement();
+    }
+  });
+
+  // Pick/focus mode
+  document.getElementById('__sw_pick_btn__')?.addEventListener('click', (e: MouseEvent) => {
     e.stopPropagation();
     swFocusModeOn = !swFocusModeOn;
-    const pickBtn = document.getElementById('__sw_pick_btn__')!;
-    pickBtn.classList.toggle('active', swFocusModeOn);
-    pickBtn.title = swFocusModeOn ? 'Focus mode ON' : 'Focus mode OFF';
+    const btn = e.currentTarget as HTMLElement;
+    btn.classList.toggle('active', swFocusModeOn);
     if (swFocusModeOn) {
       panel.classList.remove('visible');
       startPickingElement();
@@ -752,46 +921,45 @@ function injectTrackingWidget(): void {
     }
   });
 
-  // Launcher toggles panel; pauses picking while open
-  launcher.addEventListener('click', (e) => {
+  // Eye toggle
+  document.getElementById('__sw_eye_btn__')?.addEventListener('click', (e: MouseEvent) => {
     e.stopPropagation();
-    const opening = !panel.classList.contains('visible');
-    if (opening) {
-      cancelPickingElement(); // pause while panel is open
-      panel.classList.add('visible');
-    } else {
-      panel.classList.remove('visible');
-      if (swFocusModeOn) startPickingElement(); // resume only if focus mode is on
-    }
-  });
-
-  document.getElementById('__sw_eye_btn__')!.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const eyeBtn = document.getElementById('__sw_eye_btn__')!;
     swMarkersVisible = !swMarkersVisible;
-    eyeBtn.innerHTML = swMarkersVisible ? SW_SVG_EYE : SW_SVG_EYEOFF;
-    eyeBtn.classList.toggle('active', swMarkersVisible);
+    const btn = e.currentTarget as HTMLElement;
+    btn.innerHTML = swMarkersVisible ? SW_SVG_EYE : SW_SVG_EYEOFF;
+    btn.classList.toggle('active', swMarkersVisible);
+    btn.title = swMarkersVisible ? 'Hide markers' : 'Show markers';
     swSetMarkersVisibility(swMarkersVisible);
   });
 
-  document.getElementById('__sw_del_btn__')!.addEventListener('click', (e) => {
+  // Global delete
+  document.getElementById('__sw_del_all_btn__')?.addEventListener('click', (e: MouseEvent) => {
     e.stopPropagation();
-    const btn = document.getElementById('__sw_del_btn__')!;
+    if (!confirm('Delete ALL annotations for ALL websites?')) return;
+    chrome.storage.local.set({ smartwriterAnnotations: [] }, () => {
+      swRemoveAllMarkers();
+      swUpdateCount(0);
+      panel.classList.remove('visible');
+      swShowToast('Global memory cleared');
+    });
+  });
+
+  // Local delete
+  document.getElementById('__sw_del_btn__')?.addEventListener('click', (e: MouseEvent) => {
+    e.stopPropagation();
+    const btn = e.currentTarget as HTMLElement;
     if (!swClearConfirm) {
       swClearConfirm = true;
       btn.classList.add('confirm');
-      btn.title = 'Click again to confirm';
       if (swClearTimer) clearTimeout(swClearTimer);
       swClearTimer = setTimeout(() => {
         swClearConfirm = false;
         btn.classList.remove('confirm');
-        btn.title = 'Clear page annotations';
       }, 2500);
       return;
     }
     swClearConfirm = false;
     btn.classList.remove('confirm');
-    if (swClearTimer) clearTimeout(swClearTimer);
     chrome.storage.local.get('smartwriterAnnotations', (result) => {
       const url = window.location.href;
       const kept = (result.smartwriterAnnotations || []).filter((a: SwAnnotation) => a.url !== url);
@@ -799,24 +967,26 @@ function injectTrackingWidget(): void {
         swRemoveAllMarkers();
         swUpdateCount(0);
         panel.classList.remove('visible');
-        swShowToast('All annotations cleared');
+        swShowToast('Page annotations cleared');
       });
     });
   });
 
+  // Global listeners (attached once)
   document.addEventListener('click', swClosePanel);
   document.addEventListener('keydown', swWidgetKeydown, true);
   window.addEventListener('scroll', swOnScroll, { passive: true });
   window.addEventListener('resize', swOnScroll, { passive: true });
+
+  // Initial markers sync
   swRefreshMarkers();
-  startPickingElement();
 }
 
 function swClosePanel(e: MouseEvent): void {
   const panel = document.getElementById('__sw_panel__');
-  const launcher = document.getElementById('__sw_launcher__');
-  if (panel && launcher && panel.classList.contains('visible') &&
-      !panel.contains(e.target as Node) && !launcher.contains(e.target as Node)) {
+  const launcherBtn = document.getElementById('__sw_launcher_btn__');
+  if (panel && launcherBtn && panel.classList.contains('visible') &&
+      !panel.contains(e.target as Node) && !launcherBtn.contains(e.target as Node)) {
     panel.classList.remove('visible');
     if (swClearConfirm) {
       swClearConfirm = false;
@@ -841,10 +1011,13 @@ function removeTrackingWidget(): void {
   document.getElementById('__sw_toast__')?.remove();
   swActiveTip?.remove();
   swActiveTip = null;
+
+  // Crucial: Must match addEventListener options for successful removal
   document.removeEventListener('click', swClosePanel);
   document.removeEventListener('keydown', swWidgetKeydown, true);
-  window.removeEventListener('scroll', swOnScroll);
-  window.removeEventListener('resize', swOnScroll);
+  window.removeEventListener('scroll', swOnScroll, { passive: true } as any);
+  window.removeEventListener('resize', swOnScroll, { passive: true } as any);
+  
   if (swScrollTimer) clearTimeout(swScrollTimer);
   if (swClearTimer) clearTimeout(swClearTimer);
 }
@@ -905,6 +1078,11 @@ function onPickerClick(e: MouseEvent): void {
 
 function swWidgetKeydown(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return;
+  
+  // SCIENTIFIC CHECK: Only allow Focus Mode toggle if the widget is actually active on screen
+  const isActuallyInFlow = !!document.getElementById('__sw_flow_id__');
+  if (!swTrackingActive && !isActuallyInFlow && !swTabFlowEnabled) return;
+
   // Let popup handle its own Esc
   if (document.getElementById('__sw_ann_popup__')) return;
   e.preventDefault();
@@ -1449,16 +1627,18 @@ function swShowToast(msg: string): void {
 
 // ==================== END TRACKING SYSTEM ====================
 
-chrome.runtime
-  .sendMessage({ type: 'REGISTER', tabId: (chrome.runtime as any).id, url: window.location.href })
-  .catch(() => {
-    // Ignore errors during registration
-  });
-
-// Re-apply tracking widget if it was active before navigation
-chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' })
-  .then((resp: any) => { if (resp?.active) injectTrackingWidget(); })
-  .catch(() => {});
+// High-Efficiency Initialization: Register and Sync in one go
+chrome.runtime.sendMessage({ 
+  type: 'HANDSHAKE', 
+  url: window.location.href 
+}, (res) => {
+  if (res) {
+    swTabFlowEnabled = !!res.tabFlowEnabled;
+    swTrackingActive = !!res.isTracking;
+    swFocusModeOn = false; 
+    syncWidgetVisibility(res.flowMarker);
+  }
+});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local' || !changes.smartwriterAnnotations) return;

@@ -18,7 +18,8 @@ export type ContentMessage =
   | { type: 'PRESS_KEY'; key: string }
   | { type: 'GET_TEXT'; selector: string }
   | { type: 'GET_ATTRIBUTE'; selector: string; attribute: string }
-  | { type: 'TOGGLE_TRACKING'; active: boolean }
+  | { type: 'TOGGLE_TRACKING'; active: boolean; flowMarker?: string }
+  | { type: 'TAB_FLOW_STATE_CHANGE'; enabled: boolean; flowMarker?: string }
   | { type: 'UNREGISTER' };
 
 export type ContentResponse = {
@@ -51,7 +52,7 @@ export type McpResponse = {
 export type TabsUpdate = {
   type: 'TABS_UPDATE';
   tabs: TabInfo[];
-  currentTabId: number | null;
+  connectedTabId: number | null;
 };
 
 // ==================== ANNOTATION TYPES ====================

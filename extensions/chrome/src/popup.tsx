@@ -7,6 +7,7 @@ import {
   Trash2,
   Wifi,
   WifiOff,
+  Activity,
 } from 'lucide-react';
 
 import { Button } from './components/ui/button';
@@ -22,7 +23,7 @@ interface ServerStatus {
 
 interface Status {
   servers: ServerStatus[];
-  currentTabId: number | null;
+  connectedTabId: number | null;
   trackingActive: boolean;
 }
 
@@ -252,6 +253,18 @@ function SettingsPanel({
   const [port, setPort] = React.useState('');
   const [name, setName] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  const [tabFlow, setTabFlow] = React.useState(false);
+
+  React.useEffect(() => {
+    chrome.storage.local.get('smartwriterTabFlow', (res) => {
+      setTabFlow(!!res.smartwriterTabFlow);
+    });
+  }, []);
+
+  const toggleTabFlow = (val: boolean) => {
+    setTabFlow(val);
+    chrome.storage.local.set({ smartwriterTabFlow: val });
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -333,6 +346,7 @@ function TabControls({
   onConnectToggle,
   onFocusConnected,
   onTrackingToggle,
+  tabFlowEnabled,
 }: {
   activeTab: chrome.tabs.Tab | null;
   currentStatus: Status | null;
@@ -340,6 +354,7 @@ function TabControls({
   onConnectToggle: () => Promise<void>;
   onFocusConnected: () => Promise<void>;
   onTrackingToggle: () => Promise<void>;
+  tabFlowEnabled: boolean;
 }) {
   if (!currentStatus) {
     return (
@@ -350,8 +365,21 @@ function TabControls({
     );
   }
 
-  const isCurrentTabConnected = Boolean(currentStatus.currentTabId && currentStatus.currentTabId === activeTab?.id);
-  const hasConnectedTab = Boolean(currentStatus.currentTabId);
+  const isCurrentTabConnected = Boolean(currentStatus.connectedTabId && currentStatus.connectedTabId === activeTab?.id);
+  const hasConnectedTab = Boolean(currentStatus.connectedTabId);
+
+  if (tabFlowEnabled) {
+    return (
+      <section className={theme.sectionAlt}>
+        <div className={cn('text-center text-sm font-semibold', theme.textAccent)}>
+          Tab Flow Mode: ON
+        </div>
+        <div className={cn('mt-2 text-center text-xs', theme.textMuted)}>
+          Agent is orchestrating multiple tabs.
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className={theme.sectionAlt}>
@@ -397,19 +425,22 @@ function PopupApp() {
   const [currentTab, setCurrentTab] = React.useState<chrome.tabs.Tab | null>(null);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [tabFlowEnabled, setTabFlowEnabled] = React.useState(false);
 
   const refresh = React.useCallback(async () => {
     try {
       const [nextActiveTab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const nextStatus = (await chrome.runtime.sendMessage({ type: 'GET_STATUS' })) as Status;
+      const res = await chrome.storage.local.get('smartwriterTabFlow');
+      setTabFlowEnabled(!!res.smartwriterTabFlow);
 
       setActiveTab(nextActiveTab ?? null);
       setStatus(nextStatus);
       setLoadError(null);
 
-      if (nextStatus.currentTabId) {
+      if (nextStatus.connectedTabId) {
         const nextCurrentTab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
-          chrome.tabs.get(nextStatus.currentTabId!, (tab) => {
+          chrome.tabs.get(nextStatus.connectedTabId!, (tab) => {
             resolve(chrome.runtime.lastError ? null : tab);
           });
         });
@@ -428,6 +459,14 @@ function PopupApp() {
     const interval = window.setInterval(() => void refresh(), 2000);
     return () => window.clearInterval(interval);
   }, [refresh]);
+
+  const handleToggleTabFlow = async () => {
+    const next = !tabFlowEnabled;
+    setTabFlowEnabled(next);
+    await chrome.storage.local.set({ smartwriterTabFlow: next });
+    await chrome.runtime.sendMessage({ type: 'TAB_FLOW_CHANGED', enabled: next });
+    await refresh();
+  };
 
   const setServers = React.useCallback(
     async (servers: EditableServer[]) => {
@@ -465,20 +504,20 @@ function PopupApp() {
     [setServers, status]
   );
 
-  const toggleConnection = React.useCallback(async () => {
+  const handleConnectToggle = React.useCallback(async () => {
     if (!status) return;
-    const nextTabId = status.currentTabId === activeTab?.id ? null : activeTab?.id ?? null;
+    const nextTabId = status.connectedTabId === activeTab?.id ? null : activeTab?.id ?? null;
     await chrome.runtime.sendMessage({ type: 'CONNECT_TAB', tabId: nextTabId });
     await refresh();
   }, [activeTab?.id, refresh, status]);
 
-  const focusConnectedTab = React.useCallback(async () => {
-    if (!status?.currentTabId) return;
-    await chrome.tabs.update(status.currentTabId, { active: true });
+  const handleFocusConnected = React.useCallback(async () => {
+    if (!status?.connectedTabId) return;
+    await chrome.tabs.update(status.connectedTabId, { active: true });
     window.close();
-  }, [status?.currentTabId]);
+  }, [status?.connectedTabId]);
 
-  const toggleTracking = React.useCallback(async () => {
+  const handleTrackingToggle = React.useCallback(async () => {
     const response = (await chrome.runtime.sendMessage({ type: 'TOGGLE_TRACKING' })) as { active: boolean };
     setStatus((current) => (current ? { ...current, trackingActive: response.active } : current));
   }, []);
@@ -502,7 +541,35 @@ function PopupApp() {
         </Button>
       </header>
 
-      <div className={theme.contentFrame}>
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <div className={cn('p-3 rounded-xl border flex items-center justify-between', theme.cardBg, theme.cardBorder)}>
+          <div className="flex items-center gap-3">
+            <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', tabFlowEnabled ? 'bg-blue-500/20 text-blue-400' : theme.iconMuted)}>
+              <Activity size={20} />
+            </div>
+            <div>
+              <div className={cn('text-sm font-bold', theme.text)}>Tab Flow Mode</div>
+              <div className={cn('text-[10px] uppercase tracking-wider font-extrabold', tabFlowEnabled ? 'text-blue-400' : theme.textMuted)}>
+                {tabFlowEnabled ? 'Orchestration Active' : 'Single Tab Mode'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleToggleTabFlow}
+            className={cn(
+              'w-12 h-6 rounded-full transition-all duration-300 relative',
+              tabFlowEnabled ? 'bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]' : 'bg-gray-700'
+            )}
+          >
+            <div
+              className={cn(
+                'absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 transform',
+                tabFlowEnabled ? 'translate-x-7' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+
         {settingsOpen && status && (
           <SettingsPanel
             onAdd={addServer}
@@ -518,14 +585,29 @@ function PopupApp() {
           <ServerStatusList servers={status?.servers ?? []} />
         )}
 
-        <TabControls
-          activeTab={activeTab}
-          currentStatus={status}
-          currentTab={currentTab}
-          onConnectToggle={toggleConnection}
-          onFocusConnected={focusConnectedTab}
-          onTrackingToggle={toggleTracking}
-        />
+        {tabFlowEnabled ? (
+          <div className={cn('p-4 rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 py-8', theme.cardBorder)}>
+            <div className="animate-pulse flex space-x-2">
+              <div className="h-2 w-2 bg-blue-400 rounded-full"></div>
+              <div className="h-2 w-2 bg-blue-400 rounded-full"></div>
+              <div className="h-2 w-2 bg-blue-400 rounded-full"></div>
+            </div>
+            <div className={cn('text-xs font-semibold mt-2', theme.textAccent)}>Agent is in Flow Mode</div>
+            <div className={cn('text-[10px] text-center max-w-[180px]', theme.textMuted)}>
+              Use the "Link" icon on page widgets to add tabs to the sequence.
+            </div>
+          </div>
+        ) : (
+          <TabControls
+            activeTab={activeTab}
+            currentStatus={status}
+            currentTab={currentTab}
+            onConnectToggle={handleConnectToggle}
+            onFocusConnected={handleFocusConnected}
+            onTrackingToggle={handleTrackingToggle}
+            tabFlowEnabled={tabFlowEnabled}
+          />
+        )}
       </div>
     </div>
   );

@@ -364,6 +364,25 @@ const TOOLS = [
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
+    name: 'connect_tab',
+    description: 'Connect to a tab (by t:1 or internal ID) to start sending commands to it',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        tabId: { type: 'string', description: 'Flow ID like t:1 or a numeric Tab ID' },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'jump_connected_tab',
+    description: 'Focus and bring the currently connected tab to the front',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
     name: 'server_info',
     description: 'Show current smartwriter-mcp server info: port, PID, and Chrome extension connection status',
     inputSchema: { type: 'object' as const, properties: {} },
@@ -458,6 +477,9 @@ const COMMAND_MAP: Record<string, string> = {
   get_text: 'GET_TEXT',
   get_attribute: 'GET_ATTRIBUTE',
   get_tabs: 'GET_TABS',
+  get_flow_tab_ids: 'GET_FLOW_TAB_IDS',
+  connect_tab: 'CONNECT_TAB',
+  jump_connected_tab: 'JUMP_CONNECTED_TAB',
   get_annotations: 'GET_ANNOTATIONS',
   get_summary_anotations: 'GET_SUMMARY_ANOTATIONS',
   clear_annotations: 'CLEAR_ANNOTATIONS',

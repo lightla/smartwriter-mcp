@@ -13,8 +13,10 @@ type DebuggerEvaluateResult = {
   };
 };
 
-let currentTabId: number | null = null;
+let connectedTabId: number | null = null;
 let serverConfigs: ServerConfig[] = [{ port: DEFAULT_PORT }];
+let tabFlowEnabled = false;
+let flowTabs: number[] = [];
 const trackingTabIds = new Set<number>();
 const connMap = new Map<number, ConnState>();
 const ANNOTATION_MARKER_PREFIX = 'a:';
@@ -113,8 +115,8 @@ function getIndexedAnnotations(annotations: Annotation[], url?: string, type?: s
 async function getAnnotationUrlFilter(args: { url?: string; all?: boolean }): Promise<string | undefined> {
   if (args.all) return undefined;
   if (args.url) return args.url;
-  if (!currentTabId) return undefined;
-  return (await getTab(currentTabId))?.url;
+  if (!connectedTabId) return undefined;
+  return (await getTab(connectedTabId))?.url;
 }
 
 function sortIndexedAnnotations(rows: IndexedAnnotation[]): IndexedAnnotation[] {
@@ -153,7 +155,7 @@ function deleteAnnotationFromList(
 
   if (args.id) {
     const kept = annotations.filter((annotation) => annotation.id !== args.id);
-    return { kept, deleted: kept.length !== annotations.length, id: args.id };
+    return { kept: kept, deleted: kept.length !== annotations.length, id: args.id };
   }
 
   throw new Error('Missing index');
@@ -183,7 +185,11 @@ async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
 
 async function loadConfig(): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['smartwriterServers', 'smartwriterPort', 'smartwriterTabId'], async (result) => {
+    chrome.storage.local.get(['smartwriterServers', 'smartwriterPort', 'smartwriterTabId', 'smartwriterTabFlow'], async (result) => {
+      if (result.smartwriterTabFlow !== undefined) {
+        tabFlowEnabled = !!result.smartwriterTabFlow;
+      }
+      
       if (result.smartwriterServers) {
         serverConfigs = result.smartwriterServers as ServerConfig[];
       } else if (result.smartwriterPort) {
@@ -200,7 +206,7 @@ async function loadConfig(): Promise<void> {
               else res();
             });
           });
-          currentTabId = savedTabId;
+          connectedTabId = savedTabId;
         } catch {
           chrome.storage.local.remove('smartwriterTabId');
         }
@@ -235,7 +241,7 @@ async function loadIconImageData(filename: string): Promise<Record<number, Image
 function updateIcon(): void {
   const anyConnected =
     [...connMap.values()].some((s) => s.ws !== null && s.ws.readyState === WebSocket.OPEN) &&
-    currentTabId !== null;
+    connectedTabId !== null;
   setIcon(anyConnected);
 }
 
@@ -504,7 +510,16 @@ function sanitizeSelectorError(error: unknown, resolved: ResolvedSelector): Erro
   return new Error(sanitized);
 }
 
-async function sendContentCommand(tabId: number, command: string, args: Record<string, unknown>): Promise<unknown> {
+async function sendContentCommand(tabId: number | null, command: string, args: Record<string, unknown>): Promise<unknown> {
+  if (tabId === null) {
+    throw new Error('No tab connected. Open Chrome, click the Smartwriter MCP extension icon, and connect a tab.');
+  }
+
+  // Inject flow marker if toggling tracking
+  if (command === 'TOGGLE_TRACKING' && args.active) {
+    args.flowMarker = getFlowMarker(tabId) ?? undefined;
+  }
+
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`Command timeout: ${command}`)), 30000);
     chrome.tabs.sendMessage(tabId, { type: command, ...args }, (response) => {
@@ -611,113 +626,197 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
   }
 }
 
+function getFlowMarker(tabId: number): string | null {
+  const idx = flowTabs.indexOf(tabId);
+  return idx !== -1 ? `t:${idx + 1}` : null;
+}
+
+function parseFlowMarker(value: string): number | null {
+  if (!value.startsWith('t:')) return null;
+  const idx = parseInt(value.slice(2), 10) - 1;
+  return (idx >= 0 && idx < flowTabs.length) ? flowTabs[idx] : null;
+}
+
+function internalConnectTab(tabId: number): void {
+  // Tab MUST be in flow if connected
+  if (!flowTabs.includes(tabId)) {
+    flowTabs.push(tabId);
+  }
+
+  connectedTabId = tabId;
+  chrome.storage.local.set({ smartwriterTabId: connectedTabId });
+  
+  // Auto-enable tracking
+  if (!trackingTabIds.has(tabId)) {
+    trackingTabIds.add(tabId);
+  }
+
+  // Always notify the tab to update its UI with the fresh marker
+  const marker = getFlowMarker(tabId);
+  chrome.tabs.sendMessage(tabId, { 
+    type: 'TOGGLE_TRACKING', 
+    active: true,
+    flowMarker: marker ?? undefined
+  }).catch(() => {});
+  
+  updateIcon();
+  sendTabsUpdate();
+}
+
+function internalDisconnectTab(tabId: number): void {
+  flowTabs = flowTabs.filter(id => id !== tabId);
+  trackingTabIds.delete(tabId);
+  if (connectedTabId === tabId) {
+    connectedTabId = null;
+    chrome.storage.local.set({ smartwriterTabId: null });
+  }
+  
+  chrome.tabs.sendMessage(tabId, { 
+    type: 'TOGGLE_TRACKING', 
+    active: false,
+    flowMarker: undefined
+  }).catch(() => {});
+  
+  updateIcon();
+  sendTabsUpdate();
+}
+
 async function handleCommand(message: McpCommand): Promise<unknown> {
   const { command, args } = message;
 
-  if (command === 'GET_TABS') {
-    return new Promise((resolve) => {
-      chrome.tabs.query({}, (tabs) => {
-        resolve(
-          tabs
-            .filter((t) => t.id !== undefined)
-            .map((t) => ({
-              tabId: t.id,
-              url: t.url,
-              title: t.title,
-              active: t.active,
-              isConnected: t.id === currentTabId,
-            }))
-        );
-      });
-    });
-  }
-
-  if (command === 'GET_ANNOTATIONS') {
-    const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
-    const urlFilter = await getAnnotationUrlFilter({ url, all });
-    return sortIndexedAnnotations(getIndexedAnnotations(await readAnnotations(), urlFilter, type)).map(({ annotation }) => annotation);
-  }
-
-  if (command === 'GET_SUMMARY_ANOTATIONS' || command === 'GET_ANNOTATION_SUMMARIES') {
-    const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
-    const urlFilter = await getAnnotationUrlFilter({ url, all });
-    return formatAnnotationSummaries(getIndexedAnnotations(await readAnnotations(), urlFilter, type));
-  }
-
-  if (command === 'CLEAR_ANNOTATIONS') {
-    const { url, all } = args as { url?: string; all?: boolean };
-    const urlFilter = await getAnnotationUrlFilter({ url, all });
-    return new Promise((resolve) => {
-      chrome.storage.local.get('smartwriterAnnotations', (result) => {
-        const annotations = (result.smartwriterAnnotations || []) as Annotation[];
-        const kept = urlFilter ? annotations.filter((annotation) => annotation.url !== urlFilter) : [];
-        const deletedCount = annotations.length - kept.length;
-        chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
-          resolve(['cleared|scope|count', `true|${urlFilter ?? 'all'}|${deletedCount}`].join('\n'));
+  switch (command) {
+    case 'GET_TABS':
+      return new Promise((resolve) => {
+        chrome.tabs.query({}, (tabs) => {
+          resolve(
+            tabs
+              .filter((t) => t.id !== undefined)
+              .map((t) => ({
+                tabId: t.id,
+                url: t.url,
+                title: t.title,
+                active: t.active,
+                isConnected: t.id === connectedTabId,
+              }))
+          );
         });
       });
-    });
-  }
 
-  if (command === 'DELETE_ANNOTATION') {
-    return new Promise((resolve) => {
-      chrome.storage.local.get('smartwriterAnnotations', (result) => {
-        const annotations = (result.smartwriterAnnotations || []) as Annotation[];
-        const deleted = deleteAnnotationFromList(annotations, args as { index?: number | string; id?: string });
-        chrome.storage.local.set({ smartwriterAnnotations: deleted.kept }, () => {
-          resolve(['deleted', deleted.deleted ? 'true' : 'false'].join('\n'));
-        });
-      });
-    });
-  }
-
-  if (!currentTabId) {
-    throw new Error('No tab connected. Click the Smartwriter MCP extension icon to connect a tab.');
-  }
-
-  if (command === 'EVALUATE') {
-    const { marker, elementId, index } = args as { marker?: string; elementId?: string; index?: number | string };
-    let script = String(args.script ?? '');
-
-    let ref = marker ?? elementId;
-    if (!ref && index !== undefined) {
-      const parsedIndex = parseAnnotationIndex(index);
-      if (parsedIndex === null) throw new Error(`Invalid annotation index: ${String(index)}`);
-      ref = getAnnotationMarker(parsedIndex);
+    case 'GET_ANNOTATIONS': {
+      const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
+      const urlFilter = await getAnnotationUrlFilter({ url, all });
+      return sortIndexedAnnotations(getIndexedAnnotations(await readAnnotations(), urlFilter, type)).map(({ annotation }) => annotation);
     }
-    if (ref) {
-      const resolved = await resolveSelectorArgument(currentTabId, ref);
-      script = `const element = document.querySelector(${JSON.stringify(resolved.selector)});
+
+    case 'GET_SUMMARY_ANOTATIONS':
+    case 'GET_ANNOTATION_SUMMARIES': {
+      const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
+      const urlFilter = await getAnnotationUrlFilter({ url, all });
+      return formatAnnotationSummaries(getIndexedAnnotations(await readAnnotations(), urlFilter, type));
+    }
+
+    case 'CLEAR_ANNOTATIONS': {
+      const { url, all } = args as { url?: string; all?: boolean };
+      const urlFilter = await getAnnotationUrlFilter({ url, all });
+      return new Promise((resolve) => {
+        chrome.storage.local.get('smartwriterAnnotations', (result) => {
+          const annotations = (result.smartwriterAnnotations || []) as Annotation[];
+          const kept = urlFilter ? annotations.filter((annotation) => annotation.url !== urlFilter) : [];
+          const deletedCount = annotations.length - kept.length;
+          chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
+            resolve(['cleared|scope|count', `true|${urlFilter ?? 'all'}|${deletedCount}`].join('\n'));
+          });
+        });
+      });
+    }
+
+    case 'DELETE_ANNOTATION':
+      return new Promise((resolve) => {
+        chrome.storage.local.get('smartwriterAnnotations', (result) => {
+          const annotations = (result.smartwriterAnnotations || []) as Annotation[];
+          const deleted = deleteAnnotationFromList(annotations, args as { index?: number | string; id?: string });
+          chrome.storage.local.set({ smartwriterAnnotations: deleted.kept }, () => {
+            resolve(['deleted', deleted.deleted ? 'true' : 'false'].join('\n'));
+          });
+        });
+      });
+
+    case 'DISCONNECT_TAB': {
+      const selector = args.tabId ? String(args.tabId) : '';
+      let targetId = connectedTabId;
+      if (selector) {
+        targetId = selector.startsWith('t:') ? parseFlowMarker(selector) : parseInt(selector, 10);
+      }
+      if (targetId) {
+        internalDisconnectTab(targetId);
+      } else if (connectedTabId) {
+        internalDisconnectTab(connectedTabId);
+      }
+      return { success: true };
+    }
+
+    case 'CONNECT_TAB': {
+      const selector = args.tabId ? String(args.tabId) : '';
+      if (!selector) {
+        if (connectedTabId) internalDisconnectTab(connectedTabId);
+        return { success: true, connected: false };
+      }
+      const targetId = selector.startsWith('t:') ? parseFlowMarker(selector) : parseInt(selector, 10);
+      if (!targetId || isNaN(targetId)) throw new Error(`Invalid tab target: ${selector}`);
+      internalConnectTab(targetId);
+      return { success: true, connectedTabId: targetId, flowMarker: getFlowMarker(targetId) };
+    }
+
+    case 'EVALUATE': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { marker, elementId, index } = args as { marker?: string; elementId?: string; index?: number | string };
+      let script = String(args.script ?? '');
+      let ref = marker ?? elementId;
+      if (!ref && index !== undefined) {
+        const parsedIndex = parseAnnotationIndex(index);
+        if (parsedIndex !== null) ref = getAnnotationMarker(parsedIndex);
+      }
+      if (ref) {
+        const resolved = await resolveSelectorArgument(connectedTabId, ref);
+        script = `const element = document.querySelector(${JSON.stringify(resolved.selector)});
 if (!element) throw new Error(${JSON.stringify(`Element not found for index: ${resolved.index}`)});
 ${script}`;
+      }
+      return evaluateWithDebugger(connectedTabId, script, args.args as unknown[] | undefined);
     }
 
-    return evaluateWithDebugger(currentTabId, script, args.args as unknown[] | undefined);
-  }
-
-  if (command === 'HOVER' || command === 'CLICK') {
-    const resolved = await resolveSelectorArgument(currentTabId, String(args.selector ?? ''));
-    try {
-      return scrubSelectorResult(await mouseAction(currentTabId, command, resolved.selector), resolved);
-    } catch (error) {
-      throw sanitizeSelectorError(error, resolved);
+    case 'HOVER':
+    case 'CLICK': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const resolved = await resolveSelectorArgument(connectedTabId, String(args.selector ?? ''));
+      try {
+        const result = await mouseAction(connectedTabId, command, resolved.selector);
+        return scrubSelectorResult(result, resolved);
+      } catch (error) {
+        throw sanitizeSelectorError(error, resolved);
+      }
     }
-  }
 
-  if (SELECTOR_COMMANDS.has(command) && typeof args.selector === 'string') {
-    const resolved = await resolveSelectorArgument(currentTabId, args.selector);
-    try {
-      const result = await sendContentCommand(currentTabId, command, {
-        ...args,
-        selector: resolved.selector,
-      });
-      return scrubSelectorResult(result, resolved);
-    } catch (error) {
-      throw sanitizeSelectorError(error, resolved);
-    }
-  }
+    case 'GET_FLOW_TAB_IDS':
+      return tabFlowEnabled ? flowTabs.map((id, i) => `t:${i + 1}`).join(', ') : '';
 
-  return sendContentCommand(currentTabId, command, args);
+    case 'JUMP_CONNECTED_TAB':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      await chrome.tabs.update(connectedTabId, { active: true });
+      return { success: true, connectedTabId };
+
+    default:
+      if (connectedTabId && SELECTOR_COMMANDS.has(command) && typeof args.selector === 'string') {
+        const resolved = await resolveSelectorArgument(connectedTabId, args.selector);
+        try {
+          const result = await sendContentCommand(connectedTabId, command, { ...args, selector: resolved.selector });
+          return scrubSelectorResult(result, resolved);
+        } catch (error) {
+          throw sanitizeSelectorError(error, resolved);
+        }
+      }
+      return sendContentCommand(connectedTabId, command, args);
+  }
 }
 
 function sendTabsUpdate(): void {
@@ -732,7 +831,7 @@ function sendTabsUpdate(): void {
         title: t.title || '',
         active: t.active || false,
       })),
-      currentTabId,
+      connectedTabId,
     };
     const data = JSON.stringify(update);
     for (const state of openStates) {
@@ -742,84 +841,188 @@ function sendTabsUpdate(): void {
 }
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request.type === 'GET_STATUS') {
-    sendResponse({
-      servers: serverConfigs.map((cfg) => ({
-        port: cfg.port,
-        name: cfg.name,
-        wsStatus: getPortStatus(cfg.port),
-      })),
-      currentTabId,
-      trackingActive: currentTabId !== null && trackingTabIds.has(currentTabId),
-    });
-  } else if (request.type === 'GET_TRACKING_STATE') {
-    const tabId = (_sender.tab?.id) ?? null;
-    sendResponse({ active: tabId !== null && trackingTabIds.has(tabId) });
-  } else if (request.type === 'STOP_TRACKING_FROM_CONTENT') {
-    const senderTabId = _sender.tab?.id;
-    if (senderTabId != null) trackingTabIds.delete(senderTabId);
-    sendResponse({ success: true });
-  } else if (request.type === 'TOGGLE_TRACKING') {
-    if (!currentTabId) { sendResponse({ success: false, active: false }); return true; }
-    if (trackingTabIds.has(currentTabId)) {
-      trackingTabIds.delete(currentTabId);
-      chrome.tabs.sendMessage(currentTabId, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
-    } else {
-      trackingTabIds.add(currentTabId);
-      chrome.tabs.sendMessage(currentTabId, { type: 'TOGGLE_TRACKING', active: true }).catch(() => {});
-    }
-    sendResponse({ success: true, active: trackingTabIds.has(currentTabId) });
-  } else if (request.type === 'CONNECT_TAB') {
-    const oldTabId = currentTabId;
-    currentTabId = request.tabId;
-    
-    // If we changed tabs, stop tracking in the old tab
-    if (oldTabId && oldTabId !== currentTabId) {
-      if (trackingTabIds.has(oldTabId)) {
-        trackingTabIds.delete(oldTabId);
-        chrome.tabs.sendMessage(oldTabId, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
-      }
+  const type = request.type as string;
+
+  switch (type) {
+    case 'HANDSHAKE':
+    case 'GET_STATUS': {
+      const senderTabId = _sender.tab?.id ?? null;
+      sendResponse({
+        tabFlowEnabled,
+        isTracking: senderTabId !== null && trackingTabIds.has(senderTabId),
+        flowMarker: senderTabId !== null ? getFlowMarker(senderTabId) : null,
+        connectedTabId,
+        trackingActive: connectedTabId !== null && trackingTabIds.has(connectedTabId),
+        servers: serverConfigs.map((cfg) => ({
+          port: cfg.port,
+          wsStatus: getPortStatus(cfg.port),
+        })),
+      });
+      return false;
     }
 
-    if (currentTabId) {
-      chrome.storage.local.set({ smartwriterTabId: currentTabId });
-    } else {
-      chrome.storage.local.remove('smartwriterTabId');
+    case 'GET_TRACKING_STATE': {
+      const tabId = _sender.tab?.id ?? null;
+      sendResponse({ active: tabId !== null && trackingTabIds.has(tabId) });
+      return false;
     }
-    updateIcon();
-    sendTabsUpdate();
-    sendResponse({ success: true });
-  } else if (request.type === 'SET_SERVERS') {
-    const newConfigs = request.servers as ServerConfig[];
-    const newPorts = new Set(newConfigs.map((c: ServerConfig) => c.port));
-    for (const cfg of serverConfigs) {
-      if (!newPorts.has(cfg.port)) disconnectPort(cfg.port);
+
+    case 'STOP_TRACKING_FROM_CONTENT': {
+      const senderTabId = _sender.tab?.id;
+      if (senderTabId != null) trackingTabIds.delete(senderTabId);
+      sendResponse({ success: true });
+      return false;
     }
-    serverConfigs = newConfigs;
-    chrome.storage.local.set({ smartwriterServers: serverConfigs });
-    for (const cfg of serverConfigs) connectToPort(cfg);
-    updateIcon();
-    sendResponse({ success: true });
+
+    case 'GET_FLOW_MARKER': {
+      const senderTabId = _sender.tab?.id;
+      sendResponse({ flowMarker: senderTabId ? getFlowMarker(senderTabId) : null });
+      return false;
+    }
+
+    case 'TAB_FLOW_CHANGED': {
+      tabFlowEnabled = !!request.enabled;
+      if (!tabFlowEnabled) flowTabs.length = 0;
+      
+      chrome.tabs.query({}, (tabs) => {
+        for (const tab of tabs) {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, { 
+              type: 'TAB_FLOW_STATE_CHANGE', 
+              enabled: tabFlowEnabled,
+              flowMarker: getFlowMarker(tab.id) ?? undefined
+            }).catch(() => {});
+          }
+        }
+      });
+
+      updateIcon();
+      sendTabsUpdate();
+      sendResponse({ success: true });
+      return false;
+    }
+
+    case 'TOGGLE_TRACKING': {
+      if (connectedTabId === null) {
+        sendResponse({ success: false, error: 'No tab connected' });
+        return false;
+      }
+      if (trackingTabIds.has(connectedTabId)) {
+        trackingTabIds.delete(connectedTabId);
+        chrome.tabs.sendMessage(connectedTabId, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
+      } else {
+        trackingTabIds.add(connectedTabId);
+        chrome.tabs.sendMessage(connectedTabId, { 
+          type: 'TOGGLE_TRACKING', 
+          active: true,
+          flowMarker: getFlowMarker(connectedTabId) ?? undefined
+        }).catch(() => {});
+      }
+      sendResponse({ success: true, active: trackingTabIds.has(connectedTabId) });
+      return false;
+    }
+
+    case 'TOGGLE_FLOW_TAB': {
+      let targetTabId = request.tabId;
+      if (!targetTabId && _sender.tab?.id) targetTabId = _sender.tab.id;
+      if (targetTabId) {
+        if (flowTabs.includes(targetTabId)) {
+          internalDisconnectTab(targetTabId);
+          sendResponse({ success: true, connected: false });
+        } else {
+          internalConnectTab(targetTabId);
+          sendResponse({ success: true, connected: true, flowMarker: getFlowMarker(targetTabId) });
+        }
+      } else {
+        sendResponse({ success: false, error: 'Unknown tab' });
+      }
+      return false;
+    }
+
+    case 'CONNECT_TAB':
+    case 'DISCONNECT_TAB': {
+      const targetId = request.tabId;
+      if (!targetId) {
+        if (connectedTabId !== null) internalDisconnectTab(connectedTabId);
+        sendResponse({ success: true, connected: false });
+      } else {
+        internalConnectTab(targetId);
+        sendResponse({ success: true, connected: true, connectedTabId: targetId });
+      }
+      return false;
+    }
+
+    case 'SET_SERVERS': {
+      const newConfigs = request.servers as ServerConfig[];
+      const newPorts = new Set(newConfigs.map((c: ServerConfig) => c.port));
+      for (const cfg of serverConfigs) {
+        if (!newPorts.has(cfg.port)) disconnectPort(cfg.port);
+      }
+      serverConfigs = newConfigs;
+      chrome.storage.local.set({ smartwriterServers: serverConfigs });
+      for (const cfg of serverConfigs) connectToPort(cfg);
+      updateIcon();
+      sendResponse({ success: true });
+      return false;
+    }
+
+    case 'COMMAND': {
+      handleCommand(request as unknown as McpCommand)
+        .then(res => sendResponse(res))
+        .catch(err => sendResponse({ error: err.message }));
+      return true;
+    }
+
+    default:
+      return false;
   }
 });
 
-chrome.tabs.onActivated.addListener(() => sendTabsUpdate());
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  // If in Tab Flow mode and switching to a flow tab, update connected ID
+  if (tabFlowEnabled && flowTabs.includes(tabId)) {
+    connectedTabId = tabId;
+  }
+  sendTabsUpdate();
+});
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // Re-inject tracking widget after navigation if it was active
   if (changeInfo.status === 'complete' && trackingTabIds.has(tabId)) {
     setTimeout(() => {
-      chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_TRACKING', active: true }).catch(() => {});
+      chrome.tabs.sendMessage(tabId, { 
+        type: 'TOGGLE_TRACKING', 
+        active: true,
+        flowMarker: getFlowMarker(tabId) ?? undefined
+      }).catch(() => {});
     }, 400);
   }
   sendTabsUpdate();
 });
+
+chrome.storage.onChanged.addListener((changes) => {
+  // We handle Tab Flow changes via TAB_FLOW_CHANGED message to ensure synchronization
+  // This listener is now only for external updates if they happen
+  if (changes.smartwriterTabFlow) {
+    const next = !!changes.smartwriterTabFlow.newValue;
+    if (tabFlowEnabled !== next) {
+        tabFlowEnabled = next;
+        if (!tabFlowEnabled) flowTabs.length = 0;
+        sendTabsUpdate();
+    }
+  }
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId === currentTabId) {
-    currentTabId = null;
-    chrome.storage.local.remove('smartwriterTabId');
-    updateIcon();
+  if (tabId === connectedTabId) {
+    connectedTabId = null;
+    chrome.storage.local.set({ smartwriterTabId: null });
+  }
+  const flowIdx = flowTabs.indexOf(tabId);
+  if (flowIdx !== -1) {
+      flowTabs.splice(flowIdx, 1);
   }
   trackingTabIds.delete(tabId);
+  updateIcon();
   sendTabsUpdate();
 });
 

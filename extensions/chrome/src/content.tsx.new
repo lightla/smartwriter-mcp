@@ -1,0 +1,137 @@
+function injectTrackingWidget(flowMarker?: string): void {
+  const launcherContainer = document.getElementById('__sw_launcher__');
+  
+  if (launcherContainer) {
+    // Stage 1: Update existing container
+    let flowEl = document.getElementById('__sw_flow_id__');
+    let flowLinkBtn = document.getElementById('__sw_flow_link_btn__');
+
+    if (flowMarker) {
+      if (!flowEl) {
+        flowEl = document.createElement('span');
+        flowEl.id = '__sw_flow_id__';
+        launcherContainer.appendChild(flowEl);
+        flowEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          chrome.runtime.sendMessage({ type: 'TOGGLE_FLOW_TAB', tabId: null });
+        });
+      }
+      flowEl.textContent = flowMarker;
+      flowLinkBtn?.remove();
+    } else {
+      flowEl?.remove();
+      if (swTabFlowEnabled && !flowLinkBtn) {
+        flowLinkBtn = document.createElement('div');
+        flowLinkBtn.id = '__sw_flow_link_btn__';
+        flowLinkBtn.title = 'Connect to Flow';
+        flowLinkBtn.innerHTML = SW_SVG_CONNECT;
+        launcherContainer.appendChild(flowLinkBtn);
+        flowLinkBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          chrome.runtime.sendMessage({ type: 'TOGGLE_FLOW_TAB', tabId: null });
+        });
+      } else if (!swTabFlowEnabled) {
+        flowLinkBtn?.remove();
+      }
+    }
+
+    // Force sync panel buttons
+    const pickBtn = document.getElementById('__sw_pick_btn__');
+    if (pickBtn) {
+      pickBtn.classList.toggle('active', swFocusModeOn);
+      pickBtn.title = `Focus mode ${swFocusModeOn ? 'ON' : 'OFF'}`;
+    }
+    
+    if (!swFocusModeOn) {
+      cancelPickingElement();
+      document.body.classList.remove('__sw_picking__');
+    }
+    return;
+  }
+
+  // Stage 2: Create new widget if not exists
+  const style = document.createElement('style');
+  style.id = '__sw_tracker_styles__';
+  style.textContent = TRACKING_CSS;
+  document.head.appendChild(style);
+
+  const launcher = document.createElement('div');
+  launcher.id = '__sw_launcher__';
+  
+  let inner = '';
+  if (swTabFlowEnabled && !flowMarker) {
+    inner += `<div id="__sw_flow_link_btn__" title="Connect to Flow">${SW_SVG_CONNECT}</div>`;
+  }
+  if (flowMarker) {
+    inner += `<span id="__sw_flow_id__">${flowMarker}</span>`;
+  }
+  inner += `
+    <button id="__sw_launcher_btn__" title="Smartwriter Menu">${SW_SVG_LAUNCHER}</button>
+    <span id="__sw_badge__">0</span>
+  `;
+  launcher.innerHTML = inner;
+  document.body.appendChild(launcher);
+
+  const panel = document.createElement('div');
+  panel.id = '__sw_panel__';
+  panel.innerHTML = `
+    <div class="__sw_ph__">
+      <span class="__sw_ph_name__">Track</span>
+    </div>
+    <button class="__sw_pb__ __sw_pb_focus__${swFocusModeOn ? ' active' : ''}" id="__sw_pick_btn__" title="Focus mode ${swFocusModeOn ? 'ON' : 'OFF'}">${SW_SVG_PICK}<span class="__sw_pb_hint__">ESC</span></button>
+    <div class="__sw_divider__"></div>
+    <button class="__sw_pb__${swMarkersVisible ? ' active' : ''}" id="__sw_eye_btn__" title="Toggle markers">${swMarkersVisible ? SW_SVG_EYE : SW_SVG_EYEOFF}</button>
+    <div class="__sw_divider__"></div>
+    <button class="__sw_pb__ danger" id="__sw_del_all_btn__" title="Delete ALL annotations (global)">${SW_SVG_TRASH_ALL}</button>
+    <button class="__sw_pb__ danger" id="__sw_del_btn__" title="Clear page annotations">${SW_SVG_TRASH}</button>
+  `;
+  document.body.appendChild(panel);
+
+  // Setup Listeners
+  const onFlowClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ type: 'TOGGLE_FLOW_TAB', tabId: null });
+  };
+
+  document.getElementById('__sw_flow_link_btn__')?.addEventListener('click', onFlowClick);
+  document.getElementById('__sw_flow_id__')?.addEventListener('click', onFlowClick);
+
+  document.getElementById('__sw_launcher_btn__')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.toggle('visible');
+  });
+
+  document.getElementById('__sw_pick_btn__')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    swFocusModeOn = !swFocusModeOn;
+    const btn = e.currentTarget as HTMLElement;
+    btn.classList.toggle('active', swFocusModeOn);
+    btn.title = `Focus mode ${swFocusModeOn ? 'ON' : 'OFF'}`;
+    if (swFocusModeOn) {
+      panel.classList.remove('visible');
+      startPickingElement();
+    } else {
+      cancelPickingElement();
+    }
+  });
+
+  document.getElementById('__sw_eye_btn__')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    swMarkersVisible = !swMarkersVisible;
+    const btn = e.currentTarget as HTMLElement;
+    btn.classList.toggle('active', swMarkersVisible);
+    btn.innerHTML = swMarkersVisible ? SW_SVG_EYE : SW_SVG_EYEOFF;
+    swSetMarkersVisibility(swMarkersVisible);
+  });
+
+  document.getElementById('__sw_del_btn__')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Re-use existing clear logic
+    swHandleClearPage();
+  });
+
+  document.getElementById('__sw_del_all_btn__')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    swHandleClearAll();
+  });
+}

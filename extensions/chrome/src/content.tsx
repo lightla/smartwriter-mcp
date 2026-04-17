@@ -747,8 +747,8 @@ let swTabFlowEnabled = false; // Master Switch State
 
 function handleToggleTracking(active: boolean, flowMarker?: string): unknown {
   swTrackingActive = active;
-  // In Scientific UI, we sync visibility state
   syncWidgetVisibility(flowMarker);
+  swRefreshMarkers(); // SCIENTIFIC SYNC: Ensure markers appear/disappear based on tracking state
   return { tracking: active };
 }
 
@@ -1079,9 +1079,8 @@ function onPickerClick(e: MouseEvent): void {
 function swWidgetKeydown(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return;
   
-  // SCIENTIFIC CHECK: Only allow Focus Mode toggle if the widget is actually active on screen
-  const isActuallyInFlow = !!document.getElementById('__sw_flow_id__');
-  if (!swTrackingActive && !isActuallyInFlow && !swTabFlowEnabled) return;
+  // SCIENTIFIC LOCK: Only allow Focus Mode if Tracking is explicitly ON
+  if (!swTrackingActive) return;
 
   // Let popup handle its own Esc
   if (document.getElementById('__sw_ann_popup__')) return;
@@ -1105,6 +1104,13 @@ function swWidgetKeydown(e: KeyboardEvent): void {
 let swAnnotationsCache: SwAnnotation[] = [];
 
 function swRefreshMarkers(): void {
+  // SCIENTIFIC GATE: No markers allowed if tracking is not active for this tab
+  if (!swTrackingActive) {
+    swRemoveAllMarkers();
+    swUpdateCount(0);
+    return;
+  }
+
   chrome.storage.local.get('smartwriterAnnotations', (result) => {
     const url = window.location.href;
     const all: SwAnnotation[] = result.smartwriterAnnotations || [];

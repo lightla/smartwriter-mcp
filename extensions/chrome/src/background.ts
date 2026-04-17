@@ -921,20 +921,23 @@ async function onMessageHandler(request: any, _sender: chrome.runtime.MessageSen
 
     case 'TAB_FLOW_CHANGED': {
       tabFlowEnabled = !!request.enabled;
-      if (!tabFlowEnabled) {
-        // Single Mode preparation: Identify who needs to stop
-        const tabsToStop = trackingTabIds.filter(id => id !== connectedTabId);
-        for (const id of tabsToStop) {
-          chrome.tabs.sendMessage(id, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
-        }
-        flowTabs = [];
-        trackingTabIds = connectedTabId ? [connectedTabId] : [];
+      
+      // SCIENTIFIC RESET: Clear all connection and tracking state for a clean slate when switching modes
+      const oldTrackingIds = [...trackingTabIds];
+      flowTabs = [];
+      trackingTabIds = [];
+      connectedTabId = null;
+      
+      // Notify all tabs that were previously tracking to stop immediately
+      for (const id of oldTrackingIds) {
+        chrome.tabs.sendMessage(id, { type: 'TOGGLE_TRACKING', active: false }).catch(() => {});
       }
       
       chrome.storage.local.set({ 
         smartwriterTabFlow: tabFlowEnabled,
         smartwriterFlowTabs: flowTabs,
-        smartwriterTrackingTabs: trackingTabIds
+        smartwriterTrackingTabs: trackingTabIds,
+        smartwriterTabId: connectedTabId
       });
 
       chrome.tabs.query({}, (tabs) => {
@@ -943,7 +946,7 @@ async function onMessageHandler(request: any, _sender: chrome.runtime.MessageSen
             chrome.tabs.sendMessage(tab.id, { 
               type: 'TAB_FLOW_STATE_CHANGE', 
               enabled: tabFlowEnabled,
-              flowMarker: getFlowMarker(tab.id) ?? undefined
+              flowMarker: undefined // Strictly no marker after mode change
             }).catch(() => {});
           }
         }

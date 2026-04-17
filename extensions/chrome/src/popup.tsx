@@ -2,7 +2,6 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Loader2,
-  MousePointerClick,
   Plus,
   Settings,
   Trash2,
@@ -353,33 +352,16 @@ function TabControls({
 
   const isCurrentTabConnected = Boolean(currentStatus.currentTabId && currentStatus.currentTabId === activeTab?.id);
   const hasConnectedTab = Boolean(currentStatus.currentTabId);
-  const title = isCurrentTabConnected
-    ? 'This tab is connected'
-    : hasConnectedTab
-      ? currentTab?.title || 'Connected to another tab'
-      : activeTab?.title || 'Current tab';
 
   return (
     <section className={theme.sectionAlt}>
-      <div className="mb-2 flex items-start gap-2">
-        <MousePointerClick className={cn('mt-0.5 h-4 w-4 shrink-0', isCurrentTabConnected ? theme.textSuccess : theme.textFaint)} />
-        <div className="min-w-0">
-          <div className={cn('truncate text-sm font-medium', isCurrentTabConnected ? theme.textSuccess : theme.textSecondary)} title={title}>
-            {title}
-          </div>
-          {hasConnectedTab && !isCurrentTabConnected && (
-            <div className={cn('mt-0.5 text-xs', theme.textMuted)}>Another tab is connected.</div>
-          )}
-        </div>
-      </div>
-
       <Button
         className="w-full"
         onClick={onConnectToggle}
         type="button"
-        variant={isCurrentTabConnected ? 'destructive' : 'default'}
+        variant={isCurrentTabConnected ? 'success' : 'secondary'}
       >
-        {isCurrentTabConnected ? 'Disconnect' : 'Connect This Tab'}
+        {`Connect This Tab: ${isCurrentTabConnected ? 'ON' : 'OFF'}`}
       </Button>
 
       {hasConnectedTab && !isCurrentTabConnected && (
@@ -396,7 +378,7 @@ function TabControls({
             type="button"
             variant={currentStatus.trackingActive ? 'success' : 'secondary'}
           >
-            {currentStatus.trackingActive ? 'Tracking On' : 'Tracking Off'}
+            {`Tracking: ${currentStatus.trackingActive ? 'ON' : 'OFF'}`}
           </Button>
           {currentStatus.trackingActive && (
             <div className={cn('mt-2 text-center text-xs', theme.textMuted)}>

@@ -370,7 +370,7 @@ function TabControls({
         </Button>
       )}
 
-      {hasConnectedTab && (
+      {isCurrentTabConnected && (
         <>
           <Button
             className="mt-2 w-full"

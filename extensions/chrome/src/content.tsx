@@ -553,10 +553,23 @@ const TRACKING_CSS = `
   background-color: rgba(17,100,102,0.10) !important;
 }
 .__sw_ann_hi__ {
-  outline: 2px solid #168a55 !important;
   outline-offset: 3px !important;
-  background-color: rgba(22,138,85,0.10) !important;
-  box-shadow: 0 0 0 4px rgba(22,138,85,0.08) !important;
+  transition: outline-color 0.15s, background-color 0.15s, box-shadow 0.15s !important;
+}
+.__sw_ann_hi_step__ {
+  outline: 2px solid #c17a00 !important;
+  background-color: rgba(193, 122, 0, 0.15) !important;
+  box-shadow: 0 0 0 4px rgba(193, 122, 0, 0.08) !important;
+}
+.__sw_ann_hi_change__ {
+  outline: 2px solid #168a55 !important;
+  background-color: rgba(22, 138, 85, 0.15) !important;
+  box-shadow: 0 0 0 4px rgba(22, 138, 85, 0.08) !important;
+}
+.__sw_ann_hi_bug__ {
+  outline: 2px solid #b54a43 !important;
+  background-color: rgba(181, 74, 67, 0.15) !important;
+  box-shadow: 0 0 0 4px rgba(181, 74, 67, 0.08) !important;
 }
 .__sw_picking__ * { cursor: crosshair !important; }
 /* ── Annotation popup ── */
@@ -956,15 +969,22 @@ function swAddMarker(ann: SwAnnotation): void {
     }
     let target: Element | null = null;
     try { target = document.querySelector(ann.selectors.primary); } catch (_) {}
+    if (!target) {
+      try { target = document.querySelector(ann.selectors.cssPath); } catch (_) {}
+    }
     if (target instanceof HTMLElement) {
-      target.classList.add('__sw_ann_hi__');
+      target.classList.add('__sw_ann_hi__', `__sw_ann_hi_${ann.type}__`);
       swMarkerFocusEl = target;
+      // Store the type on the element so we know which one to remove on leave
+      swMarkerFocusEl.dataset.swAnnType = ann.type;
     }
   });
 
   marker.addEventListener('mouseleave', () => {
     if (swMarkerFocusEl) {
-      swMarkerFocusEl.classList.remove('__sw_ann_hi__');
+      const type = swMarkerFocusEl.dataset.swAnnType || ann.type;
+      swMarkerFocusEl.classList.remove('__sw_ann_hi__', `__sw_ann_hi_${type}__`);
+      delete swMarkerFocusEl.dataset.swAnnType;
       swMarkerFocusEl = null;
     }
   });

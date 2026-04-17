@@ -548,9 +548,9 @@ const TRACKING_CSS = `
 .__sw_mtip_del__:hover { background: #ddb5af; }
 /* ── Pick highlight & cursor ── */
 .__sw_pick_hi__ {
-  outline: 2px solid #116466 !important;
+  outline: 2px solid #4f46e5 !important;
   outline-offset: 2px !important;
-  background-color: rgba(17,100,102,0.10) !important;
+  background-color: rgba(79, 70, 229, 0.15) !important;
 }
 .__sw_ann_hi__ {
   outline-offset: 3px !important;
@@ -669,14 +669,15 @@ const TRACKING_CSS = `
 }
 /* ── Count badge on launcher ── */
 #__sw_badge__ {
-  position: absolute; bottom: -5px; right: -5px;
-  background: #b0d6be; color: #0f5634;
-  font-size: 9px; font-weight: 800; line-height: 14px;
-  min-width: 16px; padding: 0 4px; border-radius: 8px;
-  border: 2px solid #cee1de; text-align: center;
-  pointer-events: none; display: none;
+  position: absolute; bottom: -6px; right: -6px;
+  background: #ecc0b9; color: #99100b; border: 1px solid #83201d;
+  font-size: 12px; font-weight: 700;
+  height: 24px; min-width: 24px; padding: 0 8px; border-radius: 9px;
+  box-sizing: border-box;
+  display: none; align-items: center; justify-content: center;
+  pointer-events: none;
 }
-#__sw_badge__.show { display: block; }
+#__sw_badge__.show { display: flex; }
 `;
 
 // SVG icons (feather-style)

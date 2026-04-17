@@ -510,7 +510,7 @@ function PopupApp() {
         </div>
         <Button
           aria-label="Settings"
-          className={cn('hover:bg-[#cee1de]', theme.textMuted, 'hover:text-[#102221]')}
+          className={cn('bg-[#a9c5c0] text-[#16312e] hover:bg-[#bdd4d0] hover:text-[#061918]')}
           onClick={() => setSettingsOpen((open) => !open)}
           size="icon"
           type="button"
@@ -520,29 +520,31 @@ function PopupApp() {
         </Button>
       </header>
 
-      {settingsOpen && status && (
-        <SettingsPanel
-          onAdd={addServer}
-          onRemove={removeServer}
-          onUpdate={updateServer}
-          servers={status.servers}
+      <div className={theme.contentFrame}>
+        {settingsOpen && status && (
+          <SettingsPanel
+            onAdd={addServer}
+            onRemove={removeServer}
+            onUpdate={updateServer}
+            servers={status.servers}
+          />
+        )}
+
+        {loadError ? (
+          <div className={cn('bg-[#ddb8b2] px-3 py-3 text-sm', theme.textDanger)}>{loadError}</div>
+        ) : (
+          <ServerStatusList servers={status?.servers ?? []} />
+        )}
+
+        <TabControls
+          activeTab={activeTab}
+          currentStatus={status}
+          currentTab={currentTab}
+          onConnectToggle={toggleConnection}
+          onFocusConnected={focusConnectedTab}
+          onTrackingToggle={toggleTracking}
         />
-      )}
-
-      {loadError ? (
-        <div className={cn('bg-[#ddb8b2] px-3 py-3 text-sm', theme.textDanger)}>{loadError}</div>
-      ) : (
-        <ServerStatusList servers={status?.servers ?? []} />
-      )}
-
-      <TabControls
-        activeTab={activeTab}
-        currentStatus={status}
-        currentTab={currentTab}
-        onConnectToggle={toggleConnection}
-        onFocusConnected={focusConnectedTab}
-        onTrackingToggle={toggleTracking}
-      />
+      </div>
     </div>
   );
 }

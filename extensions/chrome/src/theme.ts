@@ -5,11 +5,12 @@
 export const theme = {
   // Layout
   popup: 'w-[280px] overflow-hidden rounded-none bg-[#cee1de] text-[#102221] shadow-none',
+  contentFrame: 'overflow-hidden bg-[#cee1de]',
 
   // Header
-  header: 'flex items-center justify-between bg-[#cee1de] px-3 py-3 border-b border-[#9eb8b3]',
-  headerTitle: 'text-[17px] font-black leading-5 text-[#071b1b]',
-  headerSub: 'mt-0.5 text-xs font-semibold text-[#223936]',
+  header: 'flex items-center justify-between bg-[#789891] px-3 py-3',
+  headerTitle: 'text-[17px] font-black leading-5 text-[#061918]',
+  headerSub: 'mt-1 text-xs font-bold text-[#16312e]',
   headerAccent: 'text-[#116466]',
 
   // Sections

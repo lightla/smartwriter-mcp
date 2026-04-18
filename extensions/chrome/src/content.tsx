@@ -101,9 +101,47 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
 }
 
 function getElement(selector: string): HTMLElement {
-  const element = document.querySelector(selector) as HTMLElement | null;
-  if (!element) throw new Error(`Element not found: ${selector}`);
-  return element;
+  let el: Element | null = null;
+
+  // 1. ANNOTATION PRIORITY (a:number)
+  if (selector.startsWith('a:')) {
+    const stepNum = parseInt(selector.slice(2), 10);
+    const ann = swAnnotationsCache.find(a => a.stepNumber === stepNum);
+    if (ann) {
+      // CASCADE: Primary -> XPath
+      try { el = document.querySelector(ann.selectors.primary); } catch (_) {}
+      if (!el) {
+        try {
+          const result = document.evaluate(ann.selectors.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          el = result.singleNodeValue as Element;
+        } catch (_) { /* ignore */ }
+      }
+    }
+  } 
+  // 2. LEGACY REF PRIORITY (el:id)
+  else if (selector.startsWith('el:')) {
+    // Current system uses annotation ids or internal maps for this
+    el = document.querySelector(`[data-sw-id="${selector.slice(3)}"]`);
+  }
+  // 3. COORDINATE PRIORITY (x,y)
+  else if (/^\d+,\d+$/.test(selector)) {
+    const [x, y] = selector.split(',').map(n => parseInt(n, 10));
+    el = document.elementFromPoint(x, y);
+  }
+  // 4. RAW SELECTOR / XPATH (Anything else)
+  else if (selector.startsWith('/') || selector.startsWith('//')) {
+    try {
+      const result = document.evaluate(selector, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      el = result.singleNodeValue as Element;
+    } catch (_) { /* ignore */ }
+  } else {
+    el = document.querySelector(selector);
+  }
+
+  if (!(el instanceof HTMLElement)) {
+    throw new Error(`Target not found for: ${selector}`);
+  }
+  return el;
 }
 
 async function handleClick(selector: string): Promise<unknown> {
@@ -218,9 +256,10 @@ async function handleUncheck(selector: string): Promise<unknown> {
   return { unchecked: true, selector };
 }
 
-async function evaluateScript(script: string, args?: unknown[]): Promise<unknown> {
+async function evaluateScript(script: string, args: unknown[] = []): Promise<unknown> {
   try {
-    const fn = new Function(...(args?.map((_, i) => `arg${i}`) || []), script);
+    const argNames = (args || []).map((_, i) => `arg${i}`);
+    const fn = new Function(...argNames, script);
     const result = fn(...(args || []));
     if (result instanceof Promise) {
       return await result;
@@ -232,14 +271,13 @@ async function evaluateScript(script: string, args?: unknown[]): Promise<unknown
 }
 
 function getSnapshot(selector?: string): unknown {
-  const root = selector ? document.querySelector(selector) : document.documentElement;
-  if (!root) throw new Error(`Element not found: ${selector}`);
+  const root = selector ? getElement(selector) : document.documentElement;
   const tree = buildA11yTree(root as HTMLElement);
   return {
     url: window.location.href,
     title: document.title,
     tree,
-    html: root.innerHTML.substring(0, 5000),
+    html: root.innerHTML ? root.innerHTML.substring(0, 5000) : '',
   };
 }
 
@@ -1334,18 +1372,13 @@ function getFullCssPath(el: HTMLElement): string {
   const parts: string[] = [];
   let current: Element | null = el;
   while (current && current !== document.documentElement) {
-    let part = current.tagName.toLowerCase();
-    if ((current as HTMLElement).id) {
-      part += `#${(current as HTMLElement).id}`;
-      parts.unshift(part);
-      break;
-    }
     const parent: Element | null = current.parentElement;
-    if (parent && parent.children.length > 1) {
+    if (parent) {
       const idx = Array.from(parent.children).indexOf(current) + 1;
-      part += `:nth-child(${idx})`;
+      parts.unshift(`${current.tagName.toLowerCase()}:nth-child(${idx})`);
+    } else {
+      parts.unshift(current.tagName.toLowerCase());
     }
-    parts.unshift(part);
     current = parent;
   }
   return parts.join(' > ');
@@ -1360,7 +1393,8 @@ function getXPath(el: HTMLElement): string {
     if (parent) {
       const siblings = Array.from(parent.children).filter((c: Element) => c.nodeName === current!.nodeName);
       const idx = siblings.indexOf(current) + 1;
-      parts.unshift(siblings.length > 1 ? `${tag}[${idx}]` : tag);
+      // Always include index for scientific consistency
+      parts.unshift(`${tag}[${idx}]`);
     } else {
       parts.unshift(tag);
     }

@@ -1,5 +1,10 @@
 import type { ContentMessage, ContentResponse } from './types';
 
+const ELEMENT_REF_PREFIX = 'swref:';
+const elementRefStore = new Map<string, HTMLElement>();
+const selectorToRefStore = new Map<string, string>();
+let nextElementRefId = 1;
+type TargetType = 'annotation' | 'legacy_ref' | 'coords' | 'xpath' | 'css';
 
 
 chrome.runtime.onMessage.addListener(
@@ -23,16 +28,16 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         result = { registered: true, url: window.location.href };
         break;
       case 'CLICK':
-        result = await handleClick(message.selector);
+        result = await handleClick(message.selector, message.elementRef);
         break;
       case 'TYPE':
-        result = await handleType(message.selector, message.text);
+        result = await handleType(message.selector, message.elementRef, message.text);
         break;
       case 'FILL':
-        result = await handleFill(message.selector, message.value);
+        result = await handleFill(message.selector, message.elementRef, message.value);
         break;
       case 'SELECT':
-        result = await handleSelect(message.selector, message.options);
+        result = await handleSelect(message.selector, message.elementRef, message.options);
         break;
       case 'NAVIGATE':
         result = await handleNavigate(message.url);
@@ -50,16 +55,16 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         result = await evaluateScript(message.script, message.args);
         break;
       case 'HOVER':
-        result = await handleHover(message.selector);
+        result = await handleHover(message.selector, message.elementRef);
         break;
       case 'CHECK':
-        result = await handleCheck(message.selector);
+        result = await handleCheck(message.selector, message.elementRef);
         break;
       case 'UNCHECK':
-        result = await handleUncheck(message.selector);
+        result = await handleUncheck(message.selector, message.elementRef);
         break;
       case 'GET_SNAPSHOT':
-        result = getSnapshot(message.selector);
+        result = getSnapshot(message.selector, message.elementRef);
         break;
       case 'SCREENSHOT':
         result = await takeScreenshot();
@@ -71,10 +76,19 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         result = await pressKey(message.key);
         break;
       case 'GET_TEXT':
-        result = getText(message.selector);
+        result = getText(message.selector, message.elementRef);
         break;
       case 'GET_ATTRIBUTE':
-        result = getAttribute(message.selector, message.attribute);
+        result = getAttribute(message.selector, message.elementRef, message.attribute);
+        break;
+      case 'GET_ELEMENT_BY_MARKER':
+        result = handleGetElementByMarker(message.selector, message.elementRef);
+        break;
+      case 'GET_COMPONENT_ORIGIN':
+        result = handleGetComponentOrigin(message.selector, message.elementRef);
+        break;
+      case 'RESOLVE_TARGET':
+        result = handleResolveTarget(message.target, message.force);
         break;
       case 'UNREGISTER':
         result = { unregistered: true };
@@ -100,16 +114,67 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
   }
 }
 
-function getElement(selector: string): HTMLElement {
-  let el: Element | null = null;
+function getOrCreateElementRef(el: HTMLElement, target?: string): string {
+  if (target) {
+    const existingRef = selectorToRefStore.get(target);
+    if (existingRef) {
+      const existing = elementRefStore.get(existingRef);
+      if (existing && existing.isConnected) return existingRef;
+    }
+  }
 
-  // 1. ANNOTATION PRIORITY (a:number)
-  if (selector.startsWith('a:')) {
-    const stepNum = parseInt(selector.slice(2), 10);
+  const ref = `${ELEMENT_REF_PREFIX}${nextElementRefId++}`;
+  elementRefStore.set(ref, el);
+  if (target) selectorToRefStore.set(target, ref);
+  return ref;
+}
+
+function getElementByRef(ref: string): HTMLElement {
+  const el = elementRefStore.get(ref);
+  if (!el || !el.isConnected) {
+    elementRefStore.delete(ref);
+    throw new Error(`Element ref is stale or missing: ${ref}`);
+  }
+  return el;
+}
+
+function detectTargetType(target: string): TargetType {
+  if (/^a:\d+$/.test(target)) return 'annotation';
+  if (/^el:[A-Za-z0-9_-]+$/.test(target)) return 'legacy_ref';
+  if (/^\d+,\d+$/.test(target)) return 'coords';
+  if (target.startsWith('//') || target.startsWith('/')) return 'xpath';
+  return 'css';
+}
+
+function resolveElementFromTarget(target: string, forceFresh = false): HTMLElement {
+  if (!forceFresh) {
+    const cachedRef = selectorToRefStore.get(target);
+    if (cachedRef) {
+      const cachedEl = elementRefStore.get(cachedRef);
+      if (cachedEl && cachedEl.isConnected) return cachedEl;
+      selectorToRefStore.delete(target);
+      elementRefStore.delete(cachedRef);
+    }
+  } else {
+    const cachedRef = selectorToRefStore.get(target);
+    if (cachedRef) {
+      selectorToRefStore.delete(target);
+      elementRefStore.delete(cachedRef);
+    }
+  }
+
+  let el: Element | null = null;
+  const targetType = detectTargetType(target);
+
+  if (targetType === 'annotation') {
+    const stepNum = parseInt(target.slice(2), 10);
     const ann = swAnnotationsCache.find(a => a.stepNumber === stepNum);
     if (ann) {
-      // CASCADE: Primary -> XPath
+      // CASCADE: Primary -> CSS Path -> XPath
       try { el = document.querySelector(ann.selectors.primary); } catch (_) {}
+      if (!el) {
+        try { el = document.querySelector(ann.selectors.cssPath); } catch (_) {}
+      }
       if (!el) {
         try {
           const result = document.evaluate(ann.selectors.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
@@ -117,46 +182,66 @@ function getElement(selector: string): HTMLElement {
         } catch (_) { /* ignore */ }
       }
     }
-  } 
-  // 2. LEGACY REF PRIORITY (el:id)
-  else if (selector.startsWith('el:')) {
-    // Current system uses annotation ids or internal maps for this
-    el = document.querySelector(`[data-sw-id="${selector.slice(3)}"]`);
-  }
-  // 3. COORDINATE PRIORITY (x,y)
-  else if (/^\d+,\d+$/.test(selector)) {
-    const [x, y] = selector.split(',').map(n => parseInt(n, 10));
+  } else if (targetType === 'legacy_ref') {
+    el = document.querySelector(`[data-sw-id="${target.slice(3)}"]`);
+  } else if (targetType === 'coords') {
+    const [x, y] = target.split(',').map(n => parseInt(n, 10));
     el = document.elementFromPoint(x, y);
-  }
-  // 4. RAW SELECTOR / XPATH (Anything else)
-  else if (selector.startsWith('/') || selector.startsWith('//')) {
+  } else if (targetType === 'xpath') {
     try {
-      const result = document.evaluate(selector, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const result = document.evaluate(target, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
       el = result.singleNodeValue as Element;
     } catch (_) { /* ignore */ }
   } else {
-    el = document.querySelector(selector);
+    try {
+      el = document.querySelector(target);
+    } catch (_) {
+      throw new Error(`Invalid CSS selector target: ${target}`);
+    }
   }
 
   if (!(el instanceof HTMLElement)) {
-    throw new Error(`Target not found for: ${selector}`);
+    throw new Error(`Target not found for: ${target}`);
   }
+  getOrCreateElementRef(el, target);
   return el;
 }
 
-async function handleClick(selector: string): Promise<unknown> {
-  const element = getElement(selector);
+function getElement(selector?: string, elementRef?: string): HTMLElement {
+  if (elementRef) return getElementByRef(elementRef);
+  if (selector && selector.startsWith(ELEMENT_REF_PREFIX)) return getElementByRef(selector);
+  if (!selector) throw new Error('Missing target. Expected selector or elementRef.');
+  return resolveElementFromTarget(selector);
+}
+
+function handleResolveTarget(target: string, force = false): unknown {
+  const targetType = detectTargetType(target);
+  const element = resolveElementFromTarget(target, force);
+  const elementRef = getOrCreateElementRef(element, target);
+  return {
+    target,
+    targetType,
+    elementRef,
+    tag: element.tagName.toLowerCase(),
+    text: element.textContent?.trim().slice(0, 120) || '',
+  };
+}
+
+async function handleClick(selector?: string, elementRef?: string): Promise<unknown> {
+  const element = getElement(selector, elementRef);
+  const resolvedRef = getOrCreateElementRef(element, selector);
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(100);
   element.click();
   await delay(100);
-  return { clicked: true, selector };
+  return { clicked: true, selector: selector ?? resolvedRef, elementRef: resolvedRef };
 }
 
-async function handleType(selector: string, text: string): Promise<unknown> {
-  const element = getElement(selector) as HTMLInputElement & HTMLTextAreaElement;
+async function handleType(selector: string | undefined, elementRef: string | undefined, text: string): Promise<unknown> {
+  const element = getElement(selector, elementRef) as HTMLInputElement & HTMLTextAreaElement;
+  const resolvedRef = getOrCreateElementRef(element, selector);
   if (!('value' in element)) {
-    throw new Error(`Element is not an input: ${selector}`);
+    throw new Error(`Element is not an input: ${selector ?? elementRef}`);
   }
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(100);
@@ -168,32 +253,34 @@ async function handleType(selector: string, text: string): Promise<unknown> {
     dispatchInputEvents(element);
     await delay(10);
   }
-  return { typed: true, selector, text };
+  return { typed: true, selector: selector ?? resolvedRef, elementRef: resolvedRef, text };
 }
 
-async function handleFill(selector: string, value: string): Promise<unknown> {
-  const element = getElement(selector) as HTMLInputElement & HTMLTextAreaElement;
+async function handleFill(selector: string | undefined, elementRef: string | undefined, value: string): Promise<unknown> {
+  const element = getElement(selector, elementRef) as HTMLInputElement & HTMLTextAreaElement;
+  const resolvedRef = getOrCreateElementRef(element, selector);
   if (!('value' in element)) {
-    throw new Error(`Element is not an input: ${selector}`);
+    throw new Error(`Element is not an input: ${selector ?? elementRef}`);
   }
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(50);
   element.focus();
   element.value = value;
   dispatchInputEvents(element);
-  return { filled: true, selector, value };
+  return { filled: true, selector: selector ?? resolvedRef, elementRef: resolvedRef, value };
 }
 
-async function handleSelect(selector: string, options: string[]): Promise<unknown> {
-  const element = getElement(selector) as HTMLSelectElement;
+async function handleSelect(selector: string | undefined, elementRef: string | undefined, options: string[]): Promise<unknown> {
+  const element = getElement(selector, elementRef) as HTMLSelectElement;
+  const resolvedRef = getOrCreateElementRef(element, selector);
   if (element.tagName.toLowerCase() !== 'select') {
-    throw new Error(`Element is not a select: ${selector}`);
+    throw new Error(`Element is not a select: ${selector ?? elementRef}`);
   }
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(50);
   element.value = options[0];
   dispatchInputEvents(element);
-  return { selected: true, selector, option: options[0] };
+  return { selected: true, selector: selector ?? resolvedRef, elementRef: resolvedRef, option: options[0] };
 }
 
 async function handleNavigate(url: string): Promise<unknown> {
@@ -220,40 +307,43 @@ async function handleReload(): Promise<unknown> {
   return { reloading: true, url: window.location.href };
 }
 
-async function handleHover(selector: string): Promise<unknown> {
-  const element = getElement(selector);
+async function handleHover(selector?: string, elementRef?: string): Promise<unknown> {
+  const element = getElement(selector, elementRef);
+  const resolvedRef = getOrCreateElementRef(element, selector);
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(100);
   const event = new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window });
   element.dispatchEvent(event);
   await delay(100);
-  return { hovered: true, selector };
+  return { hovered: true, selector: selector ?? resolvedRef, elementRef: resolvedRef };
 }
 
-async function handleCheck(selector: string): Promise<unknown> {
-  const element = getElement(selector) as HTMLInputElement;
+async function handleCheck(selector?: string, elementRef?: string): Promise<unknown> {
+  const element = getElement(selector, elementRef) as HTMLInputElement;
+  const resolvedRef = getOrCreateElementRef(element, selector);
   if (element.tagName.toLowerCase() !== 'input' || !['checkbox', 'radio'].includes(element.type)) {
-    throw new Error(`Element is not a checkbox or radio input: ${selector}`);
+    throw new Error(`Element is not a checkbox or radio input: ${selector ?? elementRef}`);
   }
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(50);
   element.focus();
   element.checked = true;
   dispatchInputEvents(element);
-  return { checked: true, selector };
+  return { checked: true, selector: selector ?? resolvedRef, elementRef: resolvedRef };
 }
 
-async function handleUncheck(selector: string): Promise<unknown> {
-  const element = getElement(selector) as HTMLInputElement;
+async function handleUncheck(selector?: string, elementRef?: string): Promise<unknown> {
+  const element = getElement(selector, elementRef) as HTMLInputElement;
+  const resolvedRef = getOrCreateElementRef(element, selector);
   if (element.tagName.toLowerCase() !== 'input' || element.type !== 'checkbox') {
-    throw new Error(`Element is not a checkbox input: ${selector}`);
+    throw new Error(`Element is not a checkbox input: ${selector ?? elementRef}`);
   }
   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await delay(50);
   element.focus();
   element.checked = false;
   dispatchInputEvents(element);
-  return { unchecked: true, selector };
+  return { unchecked: true, selector: selector ?? resolvedRef, elementRef: resolvedRef };
 }
 
 async function evaluateScript(script: string, args: unknown[] = []): Promise<unknown> {
@@ -270,8 +360,8 @@ async function evaluateScript(script: string, args: unknown[] = []): Promise<unk
   }
 }
 
-function getSnapshot(selector?: string): unknown {
-  const root = selector ? getElement(selector) : document.documentElement;
+function getSnapshot(selector?: string, elementRef?: string): unknown {
+  const root = (selector || elementRef) ? getElement(selector, elementRef) : document.documentElement;
   const tree = buildA11yTree(root as HTMLElement);
   return {
     url: window.location.href,
@@ -440,14 +530,112 @@ async function pressKey(key: string): Promise<unknown> {
   return { keyPressed: true, key };
 }
 
-function getText(selector: string): unknown {
-  const element = getElement(selector);
-  return { text: element.textContent, selector };
+function getText(selector?: string, elementRef?: string): unknown {
+  const element = getElement(selector, elementRef);
+  const resolvedRef = getOrCreateElementRef(element, selector);
+  return { text: element.textContent, selector: selector ?? resolvedRef, elementRef: resolvedRef };
 }
 
-function getAttribute(selector: string, attribute: string): unknown {
-  const element = getElement(selector);
-  return { value: element.getAttribute(attribute), attribute, selector };
+function getAttribute(selector: string | undefined, elementRef: string | undefined, attribute: string): unknown {
+  const element = getElement(selector, elementRef);
+  const resolvedRef = getOrCreateElementRef(element, selector);
+  return { value: element.getAttribute(attribute), attribute, selector: selector ?? resolvedRef, elementRef: resolvedRef };
+}
+
+function handleGetElementByMarker(selector?: string, elementRef?: string): unknown {
+  const el = getElement(selector, elementRef);
+  const resolvedRef = getOrCreateElementRef(el, selector);
+  const attrs: Record<string, string> = {};
+  for (const attr of el.getAttributeNames()) {
+    attrs[attr] = el.getAttribute(attr) || '';
+  }
+  return {
+    tag: el.tagName.toLowerCase(),
+    className: el.className,
+    classList: Array.from(el.classList),
+    attributes: attrs,
+    textContent: el.textContent?.trim().substring(0, 1000),
+    innerHTML: el.innerHTML.substring(0, 1000),
+    rect: el.getBoundingClientRect(),
+    elementRef: resolvedRef,
+  };
+}
+
+function handleGetComponentOrigin(selector?: string, elementRef?: string): unknown {
+  const el = getElement(selector, elementRef);
+  
+  let sourceFile: string | undefined;
+  let lineNumber: number | undefined;
+  let columnNumber: number | undefined;
+  let componentName: string | undefined;
+  let frameworkType: string = 'unknown';
+  const fingerprints: string[] = [];
+  let debugData: any = {};
+
+  // 0. Fingerprint Detection (Detect framework even if RAM is stripped)
+  const attrs = el.getAttributeNames();
+  if (attrs.some(a => a.startsWith('data-v-'))) fingerprints.push('vue-scoped-css');
+  if (Object.keys(el).some(k => k.startsWith('__react'))) fingerprints.push('react-fiber-detected');
+  if (el.tagName.toLowerCase().includes('-')) fingerprints.push('web-component-detected');
+
+  // 1. React Recursive Crawl
+  const reactKey = Object.keys(el).find(k =>
+    k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
+  );
+  if (reactKey) {
+    frameworkType = 'react';
+    let fiber = (el as any)[reactKey];
+    while (fiber) {
+      if (!componentName && fiber.type) {
+        componentName = fiber.type.displayName || fiber.type.name;
+      }
+      if (fiber._debugSource) {
+        sourceFile = fiber._debugSource.fileName;
+        lineNumber = fiber._debugSource.lineNumber;
+        columnNumber = fiber._debugSource.columnNumber;
+        if (componentName) break;
+      }
+      fiber = fiber.return;
+    }
+  }
+
+  // 2. Vue Recursive Crawl
+  if (!sourceFile) {
+    const vueEl = el as any;
+    let vnode = vueEl.__vnode || vueEl.__vue__;
+    let component = vueEl.__vue_app__?._instance || vueEl.__vueParentComponent || vueEl._vue_instance;
+    
+    if (vnode || component) frameworkType = 'vue';
+
+    let current = component || vnode;
+    while (current) {
+      const type = current.type || (current.vnode && current.vnode.type) || current.$options;
+      if (type) {
+        if (!componentName) componentName = type.__name || type.name || type.__displayName;
+        if (type.__file) {
+          sourceFile = type.__file;
+          if (componentName) break;
+        }
+      }
+      if (!sourceFile && current.proxy && current.proxy.$options && current.proxy.$options.__file) {
+        sourceFile = current.proxy.$options.__file;
+      }
+      current = current.parent || current.$parent || current.owner || (current.vnode && current.vnode.parent);
+    }
+  }
+
+  // 3. Diagnostic Report
+  return {
+    framework: frameworkType,
+    componentName: componentName || 'Anonymous',
+    sourceFile: sourceFile || 'NOT_FOUND (Likely Production Build)',
+    lineNumber,
+    columnNumber,
+    fingerprints,
+    analysisHint: !sourceFile ? 
+      `No source file in RAM. Use get_element_by_marker to get class/id and grep_search in codebase.` : 
+      'Source file found directly in RAM.'
+  };
 }
 
 function dispatchInputEvents(element: HTMLElement): void {
@@ -782,6 +970,7 @@ let swClearTimer: ReturnType<typeof setTimeout> | null = null;
 let swFocusModeOn = false; // Default OFF as requested
 let swMarkerFocusEl: HTMLElement | null = null;
 let swTabFlowEnabled = false; // Master Switch State
+let swCurrentTabId: number | null = null;
 
 function handleToggleTracking(active: boolean, flowMarker?: string): unknown {
   swTrackingActive = active;
@@ -999,13 +1188,16 @@ function setupWidgetListeners(container: HTMLElement, launcherBtn: HTMLButtonEle
     swClearConfirm = false;
     btn.classList.remove('confirm');
     chrome.storage.local.get('smartwriterAnnotations', (result) => {
-      const url = window.location.href;
-      const kept = (result.smartwriterAnnotations || []).filter((a: SwAnnotation) => a.url !== url);
+      const currentUrl = window.location.href;
+      const kept = (result.smartwriterAnnotations || []).filter((a: SwAnnotation) => {
+        if (swCurrentTabId !== null && typeof a.tabId === 'number') return a.tabId !== swCurrentTabId;
+        return a.url !== currentUrl;
+      });
       chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
         swRemoveAllMarkers();
         swUpdateCount(0);
         panel.classList.remove('visible');
-        swShowToast('Page annotations cleared');
+        swShowToast('Tab annotations cleared');
       });
     });
   });
@@ -1150,12 +1342,14 @@ function swRefreshMarkers(): void {
   }
 
   chrome.storage.local.get('smartwriterAnnotations', (result) => {
-    const url = window.location.href;
     const all: SwAnnotation[] = result.smartwriterAnnotations || [];
-    swAnnotationsCache = all.filter(a => a.url === url);
+    const tabScoped = getTabScopedAnnotations(all).sort((a, b) => (a.stepNumber ?? 0) - (b.stepNumber ?? 0));
+    const currentUrl = window.location.href;
+    swAnnotationsCache = tabScoped;
+    const visibleAnnotations = tabScoped.filter((a) => a.url === currentUrl);
     swRemoveAllMarkers();
-    swAnnotationsCache.forEach(swAddMarker);
-    swUpdateCount(swAnnotationsCache.length);
+    visibleAnnotations.forEach(swAddMarker);
+    swUpdateCount(visibleAnnotations.length);
   });
 }
 
@@ -1497,6 +1691,7 @@ function detectFramework(el: HTMLElement): SwAnnotationFramework {
 
 interface SwAnnotation {
   id: string;
+  tabId?: number;
   url: string;
   timestamp: string;
   type: 'change' | 'step' | 'bug';
@@ -1523,11 +1718,19 @@ function swSaveAnnotation(annotation: SwAnnotation): void {
   });
 }
 
+function getTabScopedAnnotations(list: SwAnnotation[]): SwAnnotation[] {
+  if (swCurrentTabId === null) return list.filter((a) => a.url === window.location.href);
+  return list.filter((a) => {
+    if (typeof a.tabId === 'number') return a.tabId === swCurrentTabId;
+    // Backward compatibility for old records without tabId
+    return a.url === window.location.href;
+  });
+}
+
 function swGetNextStep(callback: (n: number) => void): void {
   chrome.storage.local.get('smartwriterAnnotations', (result) => {
     const list: SwAnnotation[] = result.smartwriterAnnotations || [];
-    const url = window.location.href;
-    const steps = list.filter(a => a.url === url);
+    const steps = swTabFlowEnabled ? list : getTabScopedAnnotations(list);
     const max = steps.reduce((m, a) => Math.max(m, a.stepNumber ?? 0), 0);
     callback(max + 1);
   });
@@ -1639,6 +1842,7 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
       const rect = el.getBoundingClientRect();
       const annotation: SwAnnotation = {
         id: `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        tabId: swCurrentTabId ?? undefined,
         url: window.location.href,
         timestamp: new Date().toISOString(),
         type: selectedType,
@@ -1690,6 +1894,7 @@ chrome.runtime.sendMessage({
   url: window.location.href 
 }, (res) => {
   if (res) {
+    swCurrentTabId = typeof res.senderTabId === 'number' ? res.senderTabId : null;
     swTabFlowEnabled = !!res.tabFlowEnabled;
     swTrackingActive = !!res.isTracking;
     swFocusModeOn = false; 

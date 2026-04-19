@@ -34,6 +34,13 @@ const SELECTOR_COMMANDS = new Set([
   'GET_TEXT',
   'GET_ATTRIBUTE',
 ]);
+const TARGET_RESOLUTION_COMMANDS = new Set([
+  ...SELECTOR_COMMANDS,
+  'CLICK',
+  'HOVER',
+  'GET_ELEMENT_BY_MARKER',
+  'GET_COMPONENT_ORIGIN',
+]);
 
 type ResolvedSelector = {
   selector: string;
@@ -42,26 +49,26 @@ type ResolvedSelector = {
   index?: number;
 };
 
+type TargetResolutionResult = {
+  elementRef: string;
+  target?: string;
+};
+
 type IndexedAnnotation = {
   annotation: Annotation;
   index: number;
 };
 
-type ResolvedAnnotationElement = {
-  annotation: Annotation;
+type DetailedAnnotation = Annotation & {
   index: number;
   marker: string;
-  found: boolean;
-  selector?: string;
-  element?: {
-    tag: string;
-    text?: string;
-    rect: { x: number; y: number; width: number; height: number };
-    visible: boolean;
-    disabled?: boolean;
-  };
-  currentUrl?: string;
-  urlMatchesCurrentTab: boolean;
+  tabId?: number | null;
+};
+
+type AnnotationRow = {
+  annotation: Annotation;
+  index: number;
+  markerNumber: number;
 };
 
 function getPortStatus(port: number): 'connected' | 'connecting' | 'waiting' {
@@ -115,6 +122,30 @@ function getIndexedAnnotations(annotations: Annotation[], url?: string, type?: s
     });
 }
 
+function annotationMarkerNumber(row: IndexedAnnotation): number {
+  const step = row.annotation.stepNumber;
+  if (typeof step === 'number' && Number.isInteger(step) && step > 0) return step;
+  return row.index;
+}
+
+function toAnnotationRows(rows: IndexedAnnotation[]): AnnotationRow[] {
+  return rows
+    .map((row) => ({
+      annotation: row.annotation,
+      index: row.index,
+      markerNumber: annotationMarkerNumber(row),
+    }))
+    .sort((a, b) => a.markerNumber - b.markerNumber || a.index - b.index);
+}
+
+function filterRowsByTabId(rows: IndexedAnnotation[], tabId: number, connectedUrl?: string): IndexedAnnotation[] {
+  return rows.filter(({ annotation }) => {
+    if (typeof annotation.tabId === 'number') return annotation.tabId === tabId;
+    // Backward compatibility for old records without tabId
+    return connectedUrl ? annotation.url === connectedUrl : false;
+  });
+}
+
 async function getAnnotationUrlFilter(args: { url?: string; all?: boolean }): Promise<string | undefined> {
   if (args.all) return undefined;
   if (args.url) return args.url;
@@ -127,11 +158,92 @@ function sortIndexedAnnotations(rows: IndexedAnnotation[]): IndexedAnnotation[] 
 }
 
 function formatAnnotationSummaries(rows: IndexedAnnotation[]): string {
-  const lines = sortIndexedAnnotations(rows).map(({ annotation, index }) => {
+  const lines = toAnnotationRows(rows).map(({ annotation, markerNumber }) => {
     const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    return `${getAnnotationMarker(index)}|${annotation.type}|${note}`;
+    return `${getAnnotationMarker(markerNumber)}|${annotation.type}|${note}`;
   });
   return ['id|type|note', ...lines].join('\n');
+}
+
+function getUrlLabelMap(rows: AnnotationRow[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    if (!map.has(row.annotation.url)) {
+      map.set(row.annotation.url, `p:${map.size + 1}`);
+    }
+  }
+  return map;
+}
+
+function formatCompactAnnotationsForConnectedTab(rows: IndexedAnnotation[]): string {
+  const sortedRows = toAnnotationRows(rows);
+  const urlLabels = getUrlLabelMap(sortedRows);
+  const lines = sortedRows.map(({ annotation, markerNumber }) => {
+    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
+    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${note}`;
+  });
+  const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
+  return ['id|pageId|type|note', ...sortedRows.map(({ annotation, markerNumber }) => {
+    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
+    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${annotation.type}|${note}`;
+  }), 'pageId|url', ...urlLines].join('\n');
+}
+
+function formatCompactAnnotationsGlobal(rows: IndexedAnnotation[], tabs: chrome.tabs.Tab[]): string {
+  const withTabId = toAnnotationRows(rows).map(({ annotation, markerNumber, index }) => ({
+    annotation,
+    markerNumber,
+    index,
+    tabId: typeof annotation.tabId === 'number' ? annotation.tabId : resolveTabIdByUrl(annotation.url, tabs),
+  }));
+
+  const sorted = withTabId.sort((a, b) => {
+    const tabA = a.tabId ?? Number.MAX_SAFE_INTEGER;
+    const tabB = b.tabId ?? Number.MAX_SAFE_INTEGER;
+    if (tabA !== tabB) return tabA - tabB;
+    return a.markerNumber - b.markerNumber || a.index - b.index;
+  });
+
+  const urlLabels = getUrlLabelMap(sorted.map((row) => ({
+    annotation: row.annotation,
+    index: row.index,
+    markerNumber: row.markerNumber,
+  })));
+  const lines = sorted.map(({ annotation, markerNumber, tabId }) => {
+    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
+    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${tabId ?? ''}|${annotation.type}|${note}`;
+  });
+  const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
+  return ['id|pageId|tabId|type|note', ...lines, 'pageId|url', ...urlLines].join('\n');
+}
+
+function clearAnnotationsByUrl(urlFilter?: string): Promise<string> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('smartwriterAnnotations', (result) => {
+      const annotations = (result.smartwriterAnnotations || []) as Annotation[];
+      const kept = urlFilter ? annotations.filter((annotation) => annotation.url !== urlFilter) : [];
+      const deletedCount = annotations.length - kept.length;
+      chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
+        resolve(['cleared|scope|count', `true|${urlFilter ?? 'all'}|${deletedCount}`].join('\n'));
+      });
+    });
+  });
+}
+
+function clearAnnotationsByTabId(tabId: number, connectedUrl?: string): Promise<string> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('smartwriterAnnotations', (result) => {
+      const annotations = (result.smartwriterAnnotations || []) as Annotation[];
+      const kept = annotations.filter((annotation) => {
+        if (typeof annotation.tabId === 'number') return annotation.tabId !== tabId;
+        return connectedUrl ? annotation.url !== connectedUrl : true;
+      });
+      const deletedCount = annotations.length - kept.length;
+      chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
+        resolve(['cleared|scope|count', `true|tab:${tabId}|${deletedCount}`].join('\n'));
+      });
+    });
+  });
 }
 
 function deleteAnnotationFromList(
@@ -184,6 +296,25 @@ async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
       resolve(chrome.runtime.lastError ? null : tab);
     });
   });
+}
+
+async function getTabs(): Promise<chrome.tabs.Tab[]> {
+  return new Promise((resolve) => {
+    chrome.tabs.query({}, (tabs) => resolve(tabs));
+  });
+}
+
+function toDetailedAnnotations(rows: IndexedAnnotation[]): DetailedAnnotation[] {
+  return toAnnotationRows(rows).map(({ annotation, index, markerNumber }) => ({
+    ...annotation,
+    index,
+    marker: getAnnotationMarker(markerNumber),
+  }));
+}
+
+function resolveTabIdByUrl(url: string, tabs: chrome.tabs.Tab[]): number | null {
+  const matched = tabs.find((tab) => tab.id !== undefined && tab.url === url);
+  return matched?.id ?? null;
 }
 
 async function loadConfig(): Promise<void> {
@@ -424,84 +555,66 @@ async function evaluateInAttachedDebugger(
   return result.result?.value;
 }
 
-async function resolveAnnotationElement(tabId: number, indexValue: unknown): Promise<ResolvedAnnotationElement> {
-  const { annotation, index } = await getAnnotationByIndex(indexValue);
-  const tab = await getTab(tabId);
-  const marker = getAnnotationMarker(index);
-  const selectors = [annotation.selectors?.primary, annotation.selectors?.cssPath].filter(Boolean);
-
-  const expression = `(() => {
-    const selectors = ${JSON.stringify(selectors)};
-    let element = null;
-    let matchedSelector = null;
-    for (const selector of selectors) {
-      try {
-        element = document.querySelector(selector);
-        if (element) {
-          matchedSelector = selector;
-          break;
-        }
-      } catch (_) {}
-    }
-    if (!element) return { found: false };
-    const rect = element.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
-    return {
-      found: true,
-      selector: matchedSelector,
-      element: {
-        tag: element.tagName.toLowerCase(),
-        text: (element.textContent || '').trim().slice(0, 200) || undefined,
-        rect: {
-          x: Math.round(rect.left + window.scrollX),
-          y: Math.round(rect.top + window.scrollY),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        },
-        visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden',
-        disabled: 'disabled' in element ? Boolean(element.disabled) : undefined,
-      },
-    };
-  })()`;
-
-  await ensureDebuggerAttached(tabId);
-  const resolved = (await evaluateInAttachedDebugger({ tabId }, expression, true)) as
-    | { found: false }
-    | {
-        found: true;
-        selector: string;
-        element: ResolvedAnnotationElement['element'];
-      };
-
-  return {
-    annotation,
-    index,
-    marker,
-    found: resolved.found,
-    selector: resolved.found ? resolved.selector : undefined,
-    element: resolved.found ? resolved.element : undefined,
-    currentUrl: tab?.url,
-    urlMatchesCurrentTab: tab?.url === annotation.url,
-  };
-}
-
-async function resolveSelectorArgument(tabId: number, selector: string): Promise<ResolvedSelector> {
+async function resolveSelectorArgument(_tabId: number, selector: string): Promise<ResolvedSelector> {
   const index = parseAnnotationMarker(selector);
   if (index === null) {
     return { selector, originalSelector: selector };
   }
 
-  const resolved = await resolveAnnotationElement(tabId, index);
-  if (!resolved.found || !resolved.selector) {
-    throw new Error(`Element not found for index: ${index}`);
-  }
-
   return {
-    selector: resolved.selector,
+    selector,
     originalSelector: selector,
-    marker: resolved.marker,
+    marker: getAnnotationMarker(index),
     index,
   };
+}
+
+async function resolveSelectorToElementRef(
+  tabId: number,
+  selector: string,
+  force = false
+): Promise<{ resolved: ResolvedSelector; elementRef: string }> {
+  const resolved = await resolveSelectorArgument(tabId, selector);
+  const targetResolution = (await sendContentCommand(tabId, 'RESOLVE_TARGET', {
+    target: resolved.selector,
+    force,
+  })) as TargetResolutionResult;
+  const elementRef = String(targetResolution?.elementRef ?? '');
+  if (!elementRef) {
+    throw new Error(`Failed to resolve element ref for: ${selector}`);
+  }
+  return { resolved, elementRef };
+}
+
+function isStaleElementRefError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return msg.includes('element ref is stale') || msg.includes('stale') || msg.includes('detached');
+}
+
+async function executeTargetCommandWithAutoReresolve(
+  tabId: number,
+  command: string,
+  args: Record<string, unknown>,
+  selector: string
+): Promise<{ result: unknown; resolved: ResolvedSelector }> {
+  const first = await resolveSelectorToElementRef(tabId, selector);
+  try {
+    const result = await sendContentCommand(tabId, command, {
+      ...args,
+      selector: first.resolved.selector,
+      elementRef: first.elementRef,
+    });
+    return { result, resolved: first.resolved };
+  } catch (error) {
+    if (!isStaleElementRefError(error)) throw error;
+    const retry = await resolveSelectorToElementRef(tabId, selector, true);
+    const result = await sendContentCommand(tabId, command, {
+      ...args,
+      selector: retry.resolved.selector,
+      elementRef: retry.elementRef,
+    });
+    return { result, resolved: retry.resolved };
+  }
 }
 
 function scrubSelectorResult(result: unknown, resolved: ResolvedSelector): unknown {
@@ -738,32 +851,70 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
         });
       });
 
-    case 'GET_ANNOTATIONS': {
-      const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
-      const urlFilter = await getAnnotationUrlFilter({ url, all });
-      return sortIndexedAnnotations(getIndexedAnnotations(await readAnnotations(), urlFilter, type)).map(({ annotation }) => annotation);
+    case 'GET_DETAILED_ANNOTATIONS': {
+      const { type } = args as { type?: string };
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const connectedTab = await getTab(connectedTabId);
+      const connectedUrl = connectedTab?.url;
+      const rows = filterRowsByTabId(getIndexedAnnotations(await readAnnotations(), undefined, type), connectedTabId, connectedUrl);
+      return toDetailedAnnotations(rows);
+    }
+
+    case 'GET_GLOBAL_DETAILED_ANNOTATIONS': {
+      const { type } = args as { type?: string };
+      const tabs = await getTabs();
+      const rows = toDetailedAnnotations(getIndexedAnnotations(await readAnnotations(), undefined, type)).map((row) => ({
+        ...row,
+        tabId: typeof row.tabId === 'number' ? row.tabId : resolveTabIdByUrl(row.url, tabs),
+      }));
+      return rows.sort((a, b) => {
+        const tabA = a.tabId ?? Number.MAX_SAFE_INTEGER;
+        const tabB = b.tabId ?? Number.MAX_SAFE_INTEGER;
+        if (tabA !== tabB) return tabA - tabB;
+        const markerA = Number.parseInt(String(a.marker).slice(2), 10) || 0;
+        const markerB = Number.parseInt(String(b.marker).slice(2), 10) || 0;
+        return markerA - markerB || a.index - b.index;
+      });
+    }
+
+    case 'GET_COMPACT_ANNOTATIONS': {
+      const { type } = args as { type?: string };
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const connectedTab = await getTab(connectedTabId);
+      const connectedUrl = connectedTab?.url;
+      const rows = filterRowsByTabId(getIndexedAnnotations(await readAnnotations(), undefined, type), connectedTabId, connectedUrl);
+      return formatCompactAnnotationsForConnectedTab(rows);
+    }
+
+    case 'GET_GLOBAL_COMPACT_ANNOTATIONS': {
+      const { type } = args as { type?: string };
+      return formatCompactAnnotationsGlobal(getIndexedAnnotations(await readAnnotations(), undefined, type), await getTabs());
     }
 
     case 'GET_SUMMARY_ANOTATIONS':
     case 'GET_ANNOTATION_SUMMARIES': {
-      const { url, type, all } = args as { url?: string; type?: string; all?: boolean };
-      const urlFilter = await getAnnotationUrlFilter({ url, all });
-      return formatAnnotationSummaries(getIndexedAnnotations(await readAnnotations(), urlFilter, type));
+      const { type } = args as { type?: string };
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const connectedTab = await getTab(connectedTabId);
+      const connectedUrl = connectedTab?.url;
+      const rows = filterRowsByTabId(getIndexedAnnotations(await readAnnotations(), undefined, type), connectedTabId, connectedUrl);
+      return formatCompactAnnotationsForConnectedTab(rows);
     }
+
+    case 'CLEAR_ALL_ANOTATIONS': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const connectedTab = await getTab(connectedTabId);
+      const connectedUrl = connectedTab?.url;
+      return clearAnnotationsByTabId(connectedTabId, connectedUrl);
+    }
+
+    case 'CLEAR_GLOBAL_ALL_ANOTATIONS':
+      return clearAnnotationsByUrl(undefined);
 
     case 'CLEAR_ANNOTATIONS': {
       const { url, all } = args as { url?: string; all?: boolean };
       const urlFilter = await getAnnotationUrlFilter({ url, all });
-      return new Promise((resolve) => {
-        chrome.storage.local.get('smartwriterAnnotations', (result) => {
-          const annotations = (result.smartwriterAnnotations || []) as Annotation[];
-          const kept = urlFilter ? annotations.filter((annotation) => annotation.url !== urlFilter) : [];
-          const deletedCount = annotations.length - kept.length;
-          chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
-            resolve(['cleared|scope|count', `true|${urlFilter ?? 'all'}|${deletedCount}`].join('\n'));
-          });
-        });
-      });
+      return clearAnnotationsByUrl(urlFilter);
     }
 
     case 'DELETE_ANNOTATION':
@@ -828,11 +979,12 @@ ${script}`;
     case 'HOVER':
     case 'CLICK': {
       if (!connectedTabId) throw new Error('No tab connected.');
-      const resolved = await resolveSelectorArgument(connectedTabId, String(args.selector ?? ''));
+      const selector = String(args.selector ?? '');
       try {
-        const result = await mouseAction(connectedTabId, command, resolved.selector);
+        const { result, resolved } = await executeTargetCommandWithAutoReresolve(connectedTabId, command, args, selector);
         return scrubSelectorResult(result, resolved);
       } catch (error) {
+        const resolved = await resolveSelectorArgument(connectedTabId, selector);
         throw sanitizeSelectorError(error, resolved);
       }
     }
@@ -840,18 +992,32 @@ ${script}`;
     case 'GET_FLOW_TAB_IDS':
       return tabFlowEnabled ? flowTabs.map((id, i) => `t:${i + 1}`).join(', ') : '';
 
+    case 'GET_ELEMENT_BY_MARKER':
+    case 'GET_COMPONENT_ORIGIN': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const selector = String(args.selector ?? '');
+      try {
+        const { result, resolved } = await executeTargetCommandWithAutoReresolve(connectedTabId, command, args, selector);
+        return scrubSelectorResult(result, resolved);
+      } catch (error) {
+        const resolved = await resolveSelectorArgument(connectedTabId, selector);
+        throw sanitizeSelectorError(error, resolved);
+      }
+    }
+
     case 'JUMP_CONNECTED_TAB':
       if (!connectedTabId) throw new Error('No tab connected.');
       await chrome.tabs.update(connectedTabId, { active: true });
       return { success: true, connectedTabId };
 
     default:
-      if (connectedTabId && SELECTOR_COMMANDS.has(command) && typeof args.selector === 'string') {
-        const resolved = await resolveSelectorArgument(connectedTabId, args.selector);
+      if (connectedTabId && TARGET_RESOLUTION_COMMANDS.has(command) && typeof args.selector === 'string') {
+        const selector = args.selector;
         try {
-          const result = await sendContentCommand(connectedTabId, command, { ...args, selector: resolved.selector });
+          const { result, resolved } = await executeTargetCommandWithAutoReresolve(connectedTabId, command, args, selector);
           return scrubSelectorResult(result, resolved);
         } catch (error) {
+          const resolved = await resolveSelectorArgument(connectedTabId, selector);
           throw sanitizeSelectorError(error, resolved);
         }
       }
@@ -888,6 +1054,7 @@ async function onMessageHandler(request: any, _sender: chrome.runtime.MessageSen
     case 'GET_STATUS': {
       const senderTabId = _sender.tab?.id ?? null;
       return {
+        senderTabId,
         tabFlowEnabled,
         isTracking: senderTabId !== null && trackingTabIds.includes(senderTabId),
         flowMarker: senderTabId !== null ? getFlowMarker(senderTabId) : null,

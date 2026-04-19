@@ -72,8 +72,8 @@ Load `dist/` folder in Chrome:
 // Server receives stdio and relays to extension
 
 // Tool calls:
-- list_tools() → List all Smartwriter MCP tools with descriptions
-- get_tabs() → Get all available tabs and check which one is connected
+- cli_list_tools() → List all Smartwriter MCP tools with descriptions
+- global_get_tabs() → Get all available tabs and check which one is connected
 - go_back() → Go back in history
 - go_forward() → Go forward in history
 - reload() → Reload the current page
@@ -92,7 +92,8 @@ Load `dist/` folder in Chrome:
 - wait_for(text, timeout?) → Wait for text to appear on page
 - get_text(selector) → Read text content from an element
 - get_attribute(selector, attribute) → Read an element attribute
-- get_summary_anotations(url?, type?) → Read compact annotations as plain text: id|type|note
+- get_compact_annotations(type?) → Read compact annotations for connected tab: id|pageId|type|note + pageId|url
+- global_get_compact_annotations(type?) → Read compact annotations across all tabs: id|pageId|tabId|type|note + pageId|url (sorted by tabId)
 ```
 
 Annotation action flow keeps normal selectors working while allowing lower-token annotation markers:
@@ -102,13 +103,14 @@ Annotation action flow keeps normal selectors working while allowing lower-token
 - click({ selector: ".submit-button" })
 
 // Compact annotation path:
-- get_summary_anotations() → id|type|note
-                               a:1|change|Note 1
+- get_compact_annotations() → id|url|type|note
+                               a:1|p:1|change|Note 1
+                               pageLabel|url
+                               p:1|https://example.com/orders
 - click({ selector: "a:1" })
-- clear_annotations() → cleared|scope|count
+- clear_all_anotations() → cleared|scope|count (connected tab, all URLs in that tab)
+- global_clear_all_anotations() → cleared|scope|count (all)
                       true|https://current-page...|1
-- delete_annotation({ id: "a:1" }) → deleted
-                                  true
 ```
 
 ## Key Features

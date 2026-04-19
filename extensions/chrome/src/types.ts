@@ -1,23 +1,26 @@
 export type ContentMessage =
   | { type: 'REGISTER'; tabId: number; url: string }
-  | { type: 'CLICK'; selector: string }
-  | { type: 'TYPE'; selector: string; text: string }
-  | { type: 'FILL'; selector: string; value: string }
-  | { type: 'SELECT'; selector: string; options: string[] }
+  | { type: 'CLICK'; selector?: string; elementRef?: string }
+  | { type: 'TYPE'; selector?: string; elementRef?: string; text: string }
+  | { type: 'FILL'; selector?: string; elementRef?: string; value: string }
+  | { type: 'SELECT'; selector?: string; elementRef?: string; options: string[] }
   | { type: 'NAVIGATE'; url: string }
   | { type: 'GO_BACK' }
   | { type: 'GO_FORWARD' }
   | { type: 'RELOAD' }
   | { type: 'EVALUATE'; script: string; args?: unknown[]; marker?: string; index?: number }
-  | { type: 'HOVER'; selector: string }
-  | { type: 'CHECK'; selector: string }
-  | { type: 'UNCHECK'; selector: string }
-  | { type: 'GET_SNAPSHOT'; selector?: string }
+  | { type: 'HOVER'; selector?: string; elementRef?: string }
+  | { type: 'CHECK'; selector?: string; elementRef?: string }
+  | { type: 'UNCHECK'; selector?: string; elementRef?: string }
+  | { type: 'GET_SNAPSHOT'; selector?: string; elementRef?: string }
   | { type: 'SCREENSHOT' }
   | { type: 'WAIT_FOR'; text: string; timeout?: number }
   | { type: 'PRESS_KEY'; key: string }
-  | { type: 'GET_TEXT'; selector: string }
-  | { type: 'GET_ATTRIBUTE'; selector: string; attribute: string }
+  | { type: 'GET_TEXT'; selector?: string; elementRef?: string }
+  | { type: 'GET_ATTRIBUTE'; selector?: string; elementRef?: string; attribute: string }
+  | { type: 'GET_ELEMENT_BY_MARKER'; selector?: string; elementRef?: string }
+  | { type: 'GET_COMPONENT_ORIGIN'; selector?: string; elementRef?: string }
+  | { type: 'RESOLVE_TARGET'; target: string; force?: boolean }
   | { type: 'TOGGLE_TRACKING'; active: boolean; flowMarker?: string }
   | { type: 'TAB_FLOW_STATE_CHANGE'; enabled: boolean; flowMarker?: string }
   | { type: 'UNREGISTER' };
@@ -84,6 +87,7 @@ export interface AnnotationFramework {
 
 export interface Annotation {
   id: string;
+  tabId?: number;
   url: string;
   timestamp: string;
   type: AnnotationType;

@@ -760,8 +760,8 @@ const TRACKING_CSS = `
   transform-origin: left bottom;
 }
 .__sw_marker__:hover { transform: scale(1.12); }
-.__sw_mk_step__   { background: #f1e1bd; color: #7b4d00; border: 1px solid #d5ae65; }
-.__sw_mk_change__ { background: #b0d6be; color: #12613b; border: 1px solid #94c5aa; }
+.__sw_mk_step__   { background: #b0d6be; color: #12613b; border: 1px solid #94c5aa; }
+.__sw_mk_change__ { background: #f1e1bd; color: #7b4d00; border: 1px solid #d5ae65; }
 .__sw_mk_bug__    { background: #ddb8b2; color: #842a27; border: 1px solid #d19a93; }
 .__sw_mk_dot__ { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 /* ── Marker tooltip ── */
@@ -778,8 +778,8 @@ const TRACKING_CSS = `
   font-size: 9px; font-weight: 800; text-transform: uppercase;
   letter-spacing: 0.07em; padding: 2px 8px; border-radius: 4px; margin-bottom: 7px;
 }
-.__sw_mtb_change__ { background: #b0d6be; color: #12613b; }
-.__sw_mtb_step__   { background: #f1e1bd; color: #7b4d00; }
+.__sw_mtb_change__ { background: #f1e1bd; color: #7b4d00; }
+.__sw_mtb_step__   { background: #b0d6be; color: #12613b; }
 .__sw_mtb_bug__    { background: #ddb8b2; color: #842a27; }
 .__sw_mtip_note__ {
   font-size: 12px; color: #102221; line-height: 1.5;
@@ -808,14 +808,14 @@ const TRACKING_CSS = `
   transition: outline-color 0.15s, background-color 0.15s, box-shadow 0.15s !important;
 }
 .__sw_ann_hi_step__ {
-  outline: 2px solid #c17a00 !important;
-  background-color: rgba(193, 122, 0, 0.15) !important;
-  box-shadow: 0 0 0 4px rgba(193, 122, 0, 0.08) !important;
-}
-.__sw_ann_hi_change__ {
   outline: 2px solid #168a55 !important;
   background-color: rgba(22, 138, 85, 0.15) !important;
   box-shadow: 0 0 0 4px rgba(22, 138, 85, 0.08) !important;
+}
+.__sw_ann_hi_change__ {
+  outline: 2px solid #c17a00 !important;
+  background-color: rgba(193, 122, 0, 0.15) !important;
+  box-shadow: 0 0 0 4px rgba(193, 122, 0, 0.08) !important;
 }
 .__sw_ann_hi_bug__ {
   outline: 2px solid #b54a43 !important;
@@ -877,11 +877,11 @@ const TRACKING_CSS = `
 }
 .__sw_pill__:hover { border-color: #4f625e; color: #102221; }
 .__sw_pill__ kbd { font-family: monospace; font-size: 10.5px; font-weight: 700; background: #cee1de; border-radius: 4px; padding: 2px 6px; margin-left: 4px; }
-.__sw_pchg__.sel  { border-color: #168a55; background: #b0d6be; color: #12613b; }
-.__sw_pstep__.sel { border-color: #c17a00; background: #f1e1bd; color: #7b4d00; }
+.__sw_pchg__.sel  { border-color: #c17a00; background: #f1e1bd; color: #7b4d00; }
+.__sw_pstep__.sel { border-color: #168a55; background: #b0d6be; color: #12613b; }
 .__sw_pbug__.sel  { border-color: #b54a43; background: #ddb8b2; color: #842a27; }
-.__sw_pchg__.sel kbd  { background: #96c8ac; color: #0f4f50; }
-.__sw_pstep__.sel kbd { background: #e2c981; color: #6a4300; }
+.__sw_pchg__.sel kbd  { background: #e2c981; color: #6a4300; }
+.__sw_pstep__.sel kbd { background: #96c8ac; color: #0f4f50; }
 .__sw_pbug__.sel kbd  { background: #cf9a93; color: #6d221e; }
 .__sw_si__ { display: none; align-items: center; gap: 6px; margin-bottom: 14px; }
 .__sw_si__.show { display: flex; }

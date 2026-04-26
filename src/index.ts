@@ -5,7 +5,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import net from 'net';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
+import { realpathSync, existsSync, statSync, readFileSync } from 'fs';
+import path from 'path';
 
 const DEFAULT_PORT = 9223;
 
@@ -16,18 +18,47 @@ const FINGERPRINT_CACHE = new Map<string, string>();
  * Fast file search using ripgrep or grep
  */
 function fastSearch(term: string, searchPath: string): string[] {
+  const matches = new Set<string>();
   try {
     // Priority 1: ripgrep (rg) - extremely fast
     try {
-      const rgCmd = `rg -l "${term}" "${searchPath}" -g "*.{vue,tsx,jsx}" --max-depth 10 --no-ignore | head -n 3`;
-      const files = execSync(rgCmd).toString().trim().split('\n').filter(f => f);
-      if (files.length > 0) return files;
-    } catch (e) { /* rg not found, fallback to grep */ }
+      const rgOutput = execFileSync(
+        'rg',
+        ['-l', '--max-depth', '10', '--no-ignore', '-g', '*.vue', '-g', '*.tsx', '-g', '*.jsx', term, searchPath],
+        { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' },
+      );
+      rgOutput
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 6)
+        .forEach((file) => matches.add(file));
+    } catch { /* rg not found or no results, fallback to grep */ }
+    if (matches.size > 0) return [...matches];
 
     // Priority 2: optimized grep
-    const grepCmd = `grep -r "${term}" "${searchPath}" --include="*.vue" --include="*.tsx" --include="*.jsx" --exclude-dir=node_modules -l | head -n 3`;
-    return execSync(grepCmd).toString().trim().split('\n').filter(f => f);
-  } catch (e) {
+    const grepOutput = execFileSync(
+      'grep',
+      [
+        '-R',
+        '-l',
+        '--include=*.vue',
+        '--include=*.tsx',
+        '--include=*.jsx',
+        '--exclude-dir=node_modules',
+        term,
+        searchPath,
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' },
+    );
+    grepOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 6)
+      .forEach((file) => matches.add(file));
+    return [...matches];
+  } catch {
     return [];
   }
 }
@@ -58,6 +89,63 @@ function getCliOptions(): CliOptions {
   return options;
 }
 
+type ProcessEntry = {
+  pid: number;
+  args: string;
+};
+
+function listProcesses(): ProcessEntry[] {
+  try {
+    const output = execSync('ps -eo pid=,args=', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const firstSpace = line.indexOf(' ');
+        if (firstSpace < 0) return null;
+        const pid = Number.parseInt(line.slice(0, firstSpace), 10);
+        if (!Number.isFinite(pid) || pid <= 0) return null;
+        return { pid, args: line.slice(firstSpace + 1).trim() };
+      })
+      .filter((entry): entry is ProcessEntry => entry !== null);
+  } catch {
+    return [];
+  }
+}
+
+function getParentPid(pid: number): number | null {
+  try {
+    const output = execSync(`ps -o ppid= -p ${pid}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const parentPid = Number.parseInt(output, 10);
+    return Number.isFinite(parentPid) && parentPid > 0 ? parentPid : null;
+  } catch {
+    return null;
+  }
+}
+
+function getAncestorPids(pid: number): Set<number> {
+  const ancestors = new Set<number>();
+  let currentPid = pid;
+  for (let i = 0; i < 32; i++) {
+    const parentPid = getParentPid(currentPid);
+    if (!parentPid || ancestors.has(parentPid) || parentPid === currentPid) break;
+    ancestors.add(parentPid);
+    currentPid = parentPid;
+  }
+  return ancestors;
+}
+
+function getCurrentScriptPath(): string {
+  const argvPath = process.argv[1];
+  if (!argvPath) return '';
+  try {
+    return realpathSync(argvPath);
+  } catch {
+    return path.resolve(argvPath);
+  }
+}
+
 const COMMAND_MAP: Record<string, string> = {
   click: 'CLICK',
   type: 'TYPE',
@@ -79,17 +167,17 @@ const COMMAND_MAP: Record<string, string> = {
   get_attribute: 'GET_ATTRIBUTE',
   get_dom_element: 'GET_ELEMENT_BY_MARKER',
   get_component_source: 'GET_COMPONENT_ORIGIN',
-  global_get_tabs: 'GET_TABS',
-  global_get_flow_tab_ids: 'GET_FLOW_TAB_IDS',
+  flow_get_tab_ids: 'GET_FLOW_TAB_IDS',
+  tab_get_all_compact_info: 'GET_TABS_COMPACT_INFO',
   tab_connect: 'CONNECT_TAB',
   tab_disconnect: 'DISCONNECT_TAB',
   tab_focus_connected: 'JUMP_CONNECTED_TAB',
   get_detailed_annotations: 'GET_DETAILED_ANNOTATIONS',
-  global_get_detailed_annotations: 'GET_GLOBAL_DETAILED_ANNOTATIONS',
+  flow_get_detail_anotations: 'GET_GLOBAL_DETAILED_ANNOTATIONS',
   get_compact_annotations: 'GET_COMPACT_ANNOTATIONS',
-  global_get_compact_annotations: 'GET_GLOBAL_COMPACT_ANNOTATIONS',
+  flow_get_compact_annotations: 'GET_GLOBAL_COMPACT_ANNOTATIONS',
   clear_all_anotations: 'CLEAR_ALL_ANOTATIONS',
-  global_clear_all_anotations: 'CLEAR_GLOBAL_ALL_ANOTATIONS',
+  flow_clear_all_anotations: 'CLEAR_GLOBAL_ALL_ANOTATIONS',
 };
 
 const TOOLS = [
@@ -303,13 +391,13 @@ const TOOLS = [
     },
   },
   {
-    name: 'global_get_tabs',
-    description: 'Get list of all open browser tabs',
+    name: 'flow_get_tab_ids',
+    description: 'Get flow tab IDs sorted as t:1..t:n.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
-    name: 'global_get_flow_tab_ids',
-    description: 'Get list of all tab IDs currently linked in the flow (e.g., t:1, t:2)',
+    name: 'tab_get_all_compact_info',
+    description: 'Get compact flow tab info in PSV: tabId|tabTitle.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
@@ -359,8 +447,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'global_get_detailed_annotations',
-    description: 'Get detailed annotations across all URLs, including tabId, sorted by tabId.',
+    name: 'flow_get_detail_anotations',
+    description: 'Get detailed annotations across flow tabs, sorted by annotation id.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -379,8 +467,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'global_get_compact_annotations',
-    description: 'Get compact tracked annotations across all URLs. Returns id|pageId|tabId|type|note plus pageId|url mapping, sorted by tabId.',
+    name: 'flow_get_compact_annotations',
+    description: 'Get compact tracked annotations across flow tabs. Returns id|pageId|flowId|type|note plus pageId|url mapping, sorted by annotation id.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -394,8 +482,8 @@ const TOOLS = [
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
-    name: 'global_clear_all_anotations',
-    description: 'Clear all tracked annotations across all URLs.',
+    name: 'flow_clear_all_anotations',
+    description: 'Clear all tracked annotations across flow tabs.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
 ];
@@ -573,8 +661,16 @@ async function main() {
 
     if (name === 'cli_kill_other_instances') {
       try {
-        const output = execSync(`ps aux | grep 'smartwriter-mcp' | grep -v grep | awk '{print $2}'`).toString().trim();
-        const pids = output.split('\n').map(Number).filter(p => p && p !== process.pid);
+        const scriptPath = getCurrentScriptPath();
+        const selfAndAncestors = getAncestorPids(process.pid);
+        selfAndAncestors.add(process.pid);
+        const pids = listProcesses()
+          .filter((entry) => {
+            if (selfAndAncestors.has(entry.pid)) return false;
+            if (scriptPath) return entry.args.includes(scriptPath);
+            return entry.args.includes('smartwriter-mcp/dist/index.js');
+          })
+          .map((entry) => entry.pid);
         if (pids.length === 0) return textResponse({ killed: 0 });
         pids.forEach(p => { try { process.kill(p, 'SIGTERM'); } catch { /* ignore */ } });
         return textResponse({ killed: pids.length, pids: pids.join(', ') });
@@ -593,10 +689,35 @@ async function main() {
       // GENETIC FINGERPRINTING & AUTO DISCOVERY FALLBACK
       if (name === 'get_component_source' && result && result.sourceFile?.includes('NOT_FOUND')) {
         try {
-          const fp = result.fingerprints;
+          const fp = result.fingerprints && typeof result.fingerprints === 'object' ? result.fingerprints : null;
           if (fp) {
+            const allAttrsRaw = Array.isArray((fp as any).allAttrs) ? (fp as any).allAttrs : [];
+            const allAttrs = allAttrsRaw
+              .map((entry: any) => ({
+                name: typeof entry?.name === 'string' ? entry.name : '',
+                value: typeof entry?.value === 'string' ? entry.value : '',
+              }))
+              .filter((entry: { name: string; value: string }) => entry.name.length > 0);
+            const fpId = typeof (fp as any).id === 'string' ? (fp as any).id : '';
+            const fpClassName = typeof (fp as any).className === 'string' ? (fp as any).className : '';
+            const fpClassList = Array.isArray((fp as any).classList)
+              ? (fp as any).classList.filter((item: unknown): item is string => typeof item === 'string' && item.length > 1)
+              : [];
+            const fpTagName = typeof (fp as any).tagName === 'string' ? (fp as any).tagName.toLowerCase() : '';
+            const frameworkHints = Array.isArray((fp as any).frameworkHints)
+              ? (fp as any).frameworkHints.filter((item: unknown): item is string => typeof item === 'string')
+              : [];
+            const normalizedComponentName = typeof result.componentName === 'string' && result.componentName !== 'Anonymous'
+              ? result.componentName
+              : '';
+
             // Check Cache
-            const cacheKey = fp.allAttrs?.find((a: any) => a.name.startsWith('data-v-'))?.name || fp.attributes?.id;
+            const cacheKey =
+              allAttrs.find((a: { name: string }) => a.name.startsWith('data-v-'))?.name ||
+              fpId ||
+              fpClassList[0] ||
+              fpClassName.split(/\s+/).find(Boolean) ||
+              undefined;
             if (cacheKey && FINGERPRINT_CACHE.has(cacheKey)) {
               result.sourceFile = FINGERPRINT_CACHE.get(cacheKey);
               result.analysisHint = `Found via Lightning Cache`;
@@ -606,56 +727,101 @@ async function main() {
             // Discovery Paths
             let searchPaths: string[] = [];
             if (args.project_path) {
-              searchPaths.push(String(args.project_path).replace(/^~/, process.env.HOME || ''));
+              const expanded = String(args.project_path).replace(/^~/, process.env.HOME || '');
+              searchPaths.push(path.resolve(expanded));
             } else {
               searchPaths.push(process.cwd());
-              ['~/workspace', '~/projects', '~/dev'].forEach(p => searchPaths.push(p.replace(/^~/, process.env.HOME || '')));
             }
 
             // Patterns
-            const searchPatterns: string[] = [];
-            if (fp.allAttrs) {
-              fp.allAttrs.forEach((a: any) => {
-                if (a.name.startsWith('data-v-')) searchPatterns.push(a.name);
-                else if (a.value && a.value.length > 3) searchPatterns.push(`${a.name}="${a.value}"`);
-              });
-            }
+            const searchPatternsSet = new Set<string>();
+            allAttrs.forEach((a: { name: string; value: string }) => {
+              if (a.name.startsWith('data-v-')) {
+                searchPatternsSet.add(a.name);
+                return;
+              }
+              if (a.value && a.value.length > 3) {
+                searchPatternsSet.add(`${a.name}="${a.value}"`);
+                if (a.name === 'class' || a.name === 'id' || a.name.startsWith('data-')) {
+                  searchPatternsSet.add(a.value);
+                }
+              }
+            });
+            if (fpId) searchPatternsSet.add(fpId);
+            fpClassList.forEach((className: string) => searchPatternsSet.add(className));
+            if (normalizedComponentName) searchPatternsSet.add(normalizedComponentName);
+            const searchPatterns = [...searchPatternsSet].filter((pattern) => pattern.length > 2).slice(0, 25);
 
             if (searchPatterns.length > 0) {
-              let bestMatch = null;
+              let bestMatch: string | null = null;
               let maxScore = 0;
-              const uniquePaths = [...new Set(searchPaths)].filter(p => {
-                try { return execSync(`test -d "${p}" && echo 1`).toString().trim() === '1'; } catch { return false; }
+              const scoredFiles = new Map<string, number>();
+              const uniquePaths = [...new Set(searchPaths)].filter((dirPath) => {
+                try {
+                  return existsSync(dirPath) && statSync(dirPath).isDirectory();
+                } catch {
+                  return false;
+                }
               });
+              let scannedFileCount = 0;
 
-              for (const path of uniquePaths) {
+              for (const scanPath of uniquePaths) {
                 for (const pattern of searchPatterns) {
-                  const files = fastSearch(pattern, path);
+                  const files = fastSearch(pattern, scanPath);
                   for (const file of files) {
-                    const content = execSync(`cat "${file}"`).toString();
-                    let score = 0;
-                    if (fp.allAttrs) {
-                      fp.allAttrs.forEach((a: any) => {
-                        if (content.includes(`${a.name}="${a.value}"`)) score += 10;
-                        else if (a.name.startsWith('data-v-') && content.includes(a.name)) score += 15;
-                      });
+                    if (scannedFileCount >= 120) break;
+                    scannedFileCount++;
+                    let content = '';
+                    try {
+                      content = readFileSync(file, 'utf8');
+                    } catch {
+                      continue;
                     }
+
+                    let score = scoredFiles.get(file) || 0;
+                    allAttrs.forEach((a: { name: string; value: string }) => {
+                      if (a.value && content.includes(`${a.name}="${a.value}"`)) score += 18;
+                      else if (a.name.startsWith('data-v-') && content.includes(a.name)) score += 16;
+                      else if (a.value && a.value.length > 3 && content.includes(a.value)) score += 4;
+                    });
+                    if (fpTagName && content.includes(`<${fpTagName}`)) score += 3;
+                    if (fpId && content.includes(fpId)) score += 8;
+                    fpClassList.forEach((className: string) => {
+                      if (content.includes(className)) score += 3;
+                    });
+                    if (normalizedComponentName && content.includes(normalizedComponentName)) score += 6;
+                    const basename = path.basename(file).toLowerCase();
+                    if (normalizedComponentName && basename.includes(normalizedComponentName.toLowerCase())) score += 20;
+                    if (frameworkHints.includes('vue-scoped-css') && file.endsWith('.vue')) score += 8;
+                    if (frameworkHints.includes('react-fiber-detected') && (file.endsWith('.tsx') || file.endsWith('.jsx'))) {
+                      score += 8;
+                    }
+
+                    scoredFiles.set(file, score);
                     if (score > maxScore) {
                       maxScore = score;
                       bestMatch = file;
                     }
                   }
-                  if (maxScore >= 15) break;
+                  if (scannedFileCount >= 120) break;
+                  if (maxScore >= 24) break;
                 }
-                if (maxScore >= 15) break;
+                if (scannedFileCount >= 120) break;
+                if (maxScore >= 24) break;
               }
 
               if (bestMatch) {
                 if (cacheKey) FINGERPRINT_CACHE.set(cacheKey, bestMatch);
                 result.sourceFile = bestMatch;
-                result.analysisHint = `Auto-discovered via Optimized Scanning (Score: ${maxScore})`;
+                result.analysisHint = `Auto-discovered via fingerprint scan (score=${maxScore}, scannedFiles=${Math.min(scannedFileCount, 120)})`;
+              } else {
+                result.analysisHint = `Fingerprint scan did not find confident match (scannedFiles=${Math.min(scannedFileCount, 120)})`;
               }
+            } else {
+              result.analysisHint = 'Insufficient fingerprint data for fallback scan';
             }
+          } else {
+            result.analysisHint = 'No structured fingerprints returned by extension';
           }
         } catch (e) { /* ignore fallback errors */ }
       }

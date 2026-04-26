@@ -569,14 +569,13 @@ function handleGetComponentOrigin(selector?: string, elementRef?: string): unkno
   let columnNumber: number | undefined;
   let componentName: string | undefined;
   let frameworkType: string = 'unknown';
-  const fingerprints: string[] = [];
-  let debugData: any = {};
+  const frameworkHints: string[] = [];
 
   // 0. Fingerprint Detection (Detect framework even if RAM is stripped)
   const attrs = el.getAttributeNames();
-  if (attrs.some(a => a.startsWith('data-v-'))) fingerprints.push('vue-scoped-css');
-  if (Object.keys(el).some(k => k.startsWith('__react'))) fingerprints.push('react-fiber-detected');
-  if (el.tagName.toLowerCase().includes('-')) fingerprints.push('web-component-detected');
+  if (attrs.some(a => a.startsWith('data-v-'))) frameworkHints.push('vue-scoped-css');
+  if (Object.keys(el).some(k => k.startsWith('__react'))) frameworkHints.push('react-fiber-detected');
+  if (el.tagName.toLowerCase().includes('-')) frameworkHints.push('web-component-detected');
 
   // 1. React Recursive Crawl
   const reactKey = Object.keys(el).find(k =>
@@ -631,7 +630,15 @@ function handleGetComponentOrigin(selector?: string, elementRef?: string): unkno
     sourceFile: sourceFile || 'NOT_FOUND (Likely Production Build)',
     lineNumber,
     columnNumber,
-    fingerprints,
+    fingerprints: {
+      frameworkHints,
+      tagName: el.tagName.toLowerCase(),
+      id: el.id || undefined,
+      className: el.className || undefined,
+      classList: Array.from(el.classList),
+      allAttrs: attrs.map((name) => ({ name, value: el.getAttribute(name) || '' })),
+      textSnippet: (el.textContent || '').trim().slice(0, 200),
+    },
     analysisHint: !sourceFile ? 
       `No source file in RAM. Use get_element_by_marker to get class/id and grep_search in codebase.` : 
       'Source file found directly in RAM.'
@@ -860,19 +867,22 @@ const TRACKING_CSS = `
 }
 .__sw_ta__:focus { border-color: #116466; }
 .__sw_ta__::placeholder { color: #4f625e; }
-.__sw_pills__ { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+.__sw_pills__ { display: flex; flex-wrap: nowrap; gap: 7px; margin-bottom: 14px; }
 .__sw_pill__ {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 13px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 1 1 0;
+  padding: 6px 14px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
   cursor: pointer; border: 1.5px solid #9eb8b3;
   background: transparent; color: #405551;
   font-family: inherit; transition: all 0.12s; outline: none;
 }
 .__sw_pill__:hover { border-color: #4f625e; color: #102221; }
-.__sw_pill__ kbd { font-family: monospace; font-size: 9px; font-weight: 700; background: #cee1de; border-radius: 3px; padding: 1px 4px; margin-left: 2px; }
+.__sw_pill__ kbd { font-family: monospace; font-size: 10.5px; font-weight: 700; background: #cee1de; border-radius: 4px; padding: 2px 6px; margin-left: 4px; }
 .__sw_pchg__.sel  { border-color: #168a55; background: #b0d6be; color: #12613b; }
 .__sw_pstep__.sel { border-color: #c17a00; background: #f1e1bd; color: #7b4d00; }
 .__sw_pbug__.sel  { border-color: #b54a43; background: #ddb8b2; color: #842a27; }
+.__sw_pchg__.sel kbd  { background: #96c8ac; color: #0f4f50; }
+.__sw_pstep__.sel kbd { background: #e2c981; color: #6a4300; }
+.__sw_pbug__.sel kbd  { background: #cf9a93; color: #6d221e; }
 .__sw_si__ { display: none; align-items: center; gap: 6px; margin-bottom: 14px; }
 .__sw_si__.show { display: flex; }
 .__sw_sil__ { font-size: 11px; color: #405551; font-weight: 600; }
@@ -1509,7 +1519,7 @@ function showEditPopup(ann: SwAnnotation, clientX: number, clientY: number): voi
     </div>
   `;
 
-  const popupW = 380, popupH = 480;
+  const popupW = 430, popupH = 480;
   let left = clientX;
   let top = clientY - Math.round(popupH / 2);
   if (left + popupW > window.innerWidth - 10) left = clientX - popupW - 12;
@@ -1809,7 +1819,7 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
     `;
 
     // Position popup near click, clamped to viewport
-    const popupW = 380, popupH = 480;
+    const popupW = 430, popupH = 480;
     let left = clientX + 12;
     let top = clientY - Math.round(popupH / 2);
     if (left + popupW > window.innerWidth - 10) left = clientX - popupW - 12;

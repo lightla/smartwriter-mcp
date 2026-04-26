@@ -73,7 +73,7 @@ Load `dist/` folder in Chrome:
 
 // Tool calls:
 - cli_list_tools() → List all Smartwriter MCP tools with descriptions
-- global_get_tabs() → Get all available tabs and check which one is connected
+- tab_get_all_compact_info() → Get flow tabs in compact form: tabId|tabTitle
 - go_back() → Go back in history
 - go_forward() → Go forward in history
 - reload() → Reload the current page
@@ -93,7 +93,7 @@ Load `dist/` folder in Chrome:
 - get_text(selector) → Read text content from an element
 - get_attribute(selector, attribute) → Read an element attribute
 - get_compact_annotations(type?) → Read compact annotations for connected tab: id|pageId|type|note + pageId|url
-- global_get_compact_annotations(type?) → Read compact annotations across all tabs: id|pageId|tabId|type|note + pageId|url (sorted by tabId)
+- flow_get_compact_annotations(type?) → Read compact annotations across flow tabs: id|pageId|flowId|type|note + pageId|url (sorted by annotation id)
 ```
 
 Annotation action flow keeps normal selectors working while allowing lower-token annotation markers:
@@ -109,7 +109,7 @@ Annotation action flow keeps normal selectors working while allowing lower-token
                                p:1|https://example.com/orders
 - click({ selector: "a:1" })
 - clear_all_anotations() → cleared|scope|count (connected tab, all URLs in that tab)
-- global_clear_all_anotations() → cleared|scope|count (all)
+- flow_clear_all_anotations() → cleared|scope|count (flow tabs)
                       true|https://current-page...|1
 ```
 

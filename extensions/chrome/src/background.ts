@@ -146,6 +146,17 @@ function filterRowsByTabId(rows: IndexedAnnotation[], tabId: number, connectedUr
   });
 }
 
+function resolveAnnotationTabId(annotation: Annotation, tabs: chrome.tabs.Tab[]): number | null {
+  if (typeof annotation.tabId === 'number') return annotation.tabId;
+  return resolveTabIdByUrl(annotation.url, tabs);
+}
+
+function resolveAnnotationFlowId(annotation: Annotation, tabs: chrome.tabs.Tab[]): string | null {
+  const tabId = resolveAnnotationTabId(annotation, tabs);
+  if (tabId === null) return null;
+  return getFlowMarker(tabId);
+}
+
 async function getAnnotationUrlFilter(args: { url?: string; all?: boolean }): Promise<string | undefined> {
   if (args.all) return undefined;
   if (args.url) return args.url;
@@ -178,10 +189,6 @@ function getUrlLabelMap(rows: AnnotationRow[]): Map<string, string> {
 function formatCompactAnnotationsForConnectedTab(rows: IndexedAnnotation[]): string {
   const sortedRows = toAnnotationRows(rows);
   const urlLabels = getUrlLabelMap(sortedRows);
-  const lines = sortedRows.map(({ annotation, markerNumber }) => {
-    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${note}`;
-  });
   const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
   return ['id|pageId|type|note', ...sortedRows.map(({ annotation, markerNumber }) => {
     const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
@@ -190,31 +197,26 @@ function formatCompactAnnotationsForConnectedTab(rows: IndexedAnnotation[]): str
 }
 
 function formatCompactAnnotationsGlobal(rows: IndexedAnnotation[], tabs: chrome.tabs.Tab[]): string {
-  const withTabId = toAnnotationRows(rows).map(({ annotation, markerNumber, index }) => ({
+  const flowRows = toAnnotationRows(rows).map(({ annotation, markerNumber, index }) => ({
     annotation,
     markerNumber,
     index,
-    tabId: typeof annotation.tabId === 'number' ? annotation.tabId : resolveTabIdByUrl(annotation.url, tabs),
-  }));
+    flowId: resolveAnnotationFlowId(annotation, tabs),
+  })).filter((row) => row.flowId !== null);
 
-  const sorted = withTabId.sort((a, b) => {
-    const tabA = a.tabId ?? Number.MAX_SAFE_INTEGER;
-    const tabB = b.tabId ?? Number.MAX_SAFE_INTEGER;
-    if (tabA !== tabB) return tabA - tabB;
-    return a.markerNumber - b.markerNumber || a.index - b.index;
-  });
+  const sorted = flowRows.sort((a, b) => a.markerNumber - b.markerNumber || a.index - b.index);
 
   const urlLabels = getUrlLabelMap(sorted.map((row) => ({
     annotation: row.annotation,
     index: row.index,
     markerNumber: row.markerNumber,
   })));
-  const lines = sorted.map(({ annotation, markerNumber, tabId }) => {
+  const lines = sorted.map(({ annotation, markerNumber, flowId }) => {
     const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${tabId ?? ''}|${annotation.type}|${note}`;
+    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${flowId ?? ''}|${annotation.type}|${note}`;
   });
   const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
-  return ['id|pageId|tabId|type|note', ...lines, 'pageId|url', ...urlLines].join('\n');
+  return ['id|pageId|flowId|type|note', ...lines, 'pageId|url', ...urlLines].join('\n');
 }
 
 function clearAnnotationsByUrl(urlFilter?: string): Promise<string> {
@@ -244,6 +246,10 @@ function clearAnnotationsByTabId(tabId: number, connectedUrl?: string): Promise<
       });
     });
   });
+}
+
+function flowDisabledResult(): string {
+  return ['result|reason', 'Empty|Tabflow must be enabled'].join('\n');
 }
 
 function deleteAnnotationFromList(
@@ -851,6 +857,21 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
         });
       });
 
+    case 'GET_TABS_COMPACT_INFO':
+      if (!tabFlowEnabled) throw new Error('Flow mode is disabled.');
+      return new Promise((resolve) => {
+        chrome.tabs.query({}, (tabs) => {
+          const rows = flowTabs
+            .map((tabId, idx) => {
+              const tab = tabs.find((t) => t.id === tabId);
+              if (!tab) return null;
+              return `t:${idx + 1}|${(tab.title || '').replace(/\r?\n/g, ' ').trim()}`;
+            })
+            .filter((row): row is string => row !== null);
+          resolve(['tabId|tabTitle', ...rows].join('\n'));
+        });
+      });
+
     case 'GET_DETAILED_ANNOTATIONS': {
       const { type } = args as { type?: string };
       if (!connectedTabId) throw new Error('No tab connected.');
@@ -862,15 +883,15 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
 
     case 'GET_GLOBAL_DETAILED_ANNOTATIONS': {
       const { type } = args as { type?: string };
+      if (!tabFlowEnabled) return flowDisabledResult();
       const tabs = await getTabs();
-      const rows = toDetailedAnnotations(getIndexedAnnotations(await readAnnotations(), undefined, type)).map((row) => ({
-        ...row,
-        tabId: typeof row.tabId === 'number' ? row.tabId : resolveTabIdByUrl(row.url, tabs),
-      }));
+      const rows = toDetailedAnnotations(getIndexedAnnotations(await readAnnotations(), undefined, type))
+        .map((row) => ({
+          ...row,
+          flowId: resolveAnnotationFlowId(row, tabs),
+        }))
+        .filter((row) => row.flowId !== null);
       return rows.sort((a, b) => {
-        const tabA = a.tabId ?? Number.MAX_SAFE_INTEGER;
-        const tabB = b.tabId ?? Number.MAX_SAFE_INTEGER;
-        if (tabA !== tabB) return tabA - tabB;
         const markerA = Number.parseInt(String(a.marker).slice(2), 10) || 0;
         const markerB = Number.parseInt(String(b.marker).slice(2), 10) || 0;
         return markerA - markerB || a.index - b.index;
@@ -888,6 +909,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
 
     case 'GET_GLOBAL_COMPACT_ANNOTATIONS': {
       const { type } = args as { type?: string };
+      if (!tabFlowEnabled) return flowDisabledResult();
       return formatCompactAnnotationsGlobal(getIndexedAnnotations(await readAnnotations(), undefined, type), await getTabs());
     }
 
@@ -909,6 +931,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
     }
 
     case 'CLEAR_GLOBAL_ALL_ANOTATIONS':
+      if (!tabFlowEnabled) return flowDisabledResult();
       return clearAnnotationsByUrl(undefined);
 
     case 'CLEAR_ANNOTATIONS': {
@@ -990,7 +1013,8 @@ ${script}`;
     }
 
     case 'GET_FLOW_TAB_IDS':
-      return tabFlowEnabled ? flowTabs.map((id, i) => `t:${i + 1}`).join(', ') : '';
+      if (!tabFlowEnabled) return flowDisabledResult();
+      return ['flowId', ...flowTabs.map((_, i) => `t:${i + 1}`)].join('\n');
 
     case 'GET_ELEMENT_BY_MARKER':
     case 'GET_COMPONENT_ORIGIN': {

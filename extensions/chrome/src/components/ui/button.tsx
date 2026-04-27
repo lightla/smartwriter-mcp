@@ -10,8 +10,8 @@ const buttonVariants = cva(
       variant: {
         default:     'border border-[#116466]/40 bg-[#a6d0c4] text-[#0b4546] hover:bg-[#a9cec4]',
         destructive: 'border border-[#b54a43]/40 bg-[#ddb8b2] text-[#842a27] hover:bg-[#ddb5af]',
-        outline:     'border border-[#9eb8b3] bg-transparent text-[#233c39] hover:bg-[#b8ceca] hover:text-[#102221]',
-        secondary:   'border border-[#9eb8b3] bg-[#cee1de] text-[#233c39] hover:bg-[#b8ceca]',
+        outline:     'border border-[#9eb8b3] bg-transparent text-[#233c39] hover:bg-[#98b4af] hover:text-[#102221]',
+        secondary:   'border border-[#9eb8b3] bg-[#cee1de] text-[#233c39] hover:bg-[#98b4af]',
         ghost:       'text-[#405551] hover:bg-[#cee1de] hover:text-[#102221]',
         success:     'border border-[#168a55]/45 bg-[#b0d6be] text-[#0f5634] hover:bg-[#b5d7c4]',
       },

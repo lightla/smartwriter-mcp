@@ -689,7 +689,7 @@ const TRACKING_CSS = `
   pointer-events: auto;
   position: relative;
 }
-#__sw_launcher_btn__:hover { transform: scale(1.06); background: #b8ceca; border-color: #116466; }
+#__sw_launcher_btn__:hover { transform: scale(1.06); background: #98b4af; border-color: #116466; }
 #__sw_launcher_btn__.picking { background: #a6d0c4; border-color: #116466; }
 
 /* ── Vertical panel ── */
@@ -738,7 +738,7 @@ const TRACKING_CSS = `
   display: flex; align-items: center; justify-content: center;
   color: #405551; transition: background 0.12s, color 0.12s; outline: none;
 }
-.__sw_pb__:hover { background: #b8ceca; color: #102221; }
+.__sw_pb__:hover { background: #98b4af; color: #102221; }
 .__sw_pb__.active { background: #a6d0c4; color: #0f4f50; }
 .__sw_pb__.danger:hover { background: #ddb8b2; color: #842a27; }
 .__sw_pb__.confirm { background: #ddb5af; color: #842a27; }
@@ -847,7 +847,7 @@ const TRACKING_CSS = `
   justify-content: center; font-size: 16px; font-family: inherit;
   transition: background 0.12s; outline: none; line-height: 0; padding: 0;
 }
-.__sw_px__:hover { background: #b8ceca; color: #102221; }
+.__sw_px__:hover { background: #98b4af; color: #102221; }
 .__sw_ppath__ {
   padding: 7px 18px; font-size: 10px; font-family: monospace;
   color: #4f625e; background: #cee1de;
@@ -903,7 +903,7 @@ const TRACKING_CSS = `
   cursor: pointer; border: none; outline: none; font-family: inherit; transition: all 0.12s;
 }
 .__sw_fpc__ { background: #cee1de; color: #405551; }
-.__sw_fpc__:hover { background: #b8ceca; color: #102221; }
+.__sw_fpc__:hover { background: #98b4af; color: #102221; }
 .__sw_fps__ { border: 1.5px solid #116466; background: #a6d0c4; color: #0f4f50; min-width: 130px; }
 .__sw_fps__:hover { background: #bdddd4; }
 .__sw_fps__ kbd {
@@ -957,7 +957,7 @@ const TRACKING_CSS = `
 }
 #__sw_flow_link_btn__ svg { width: 18px; height: 18px; stroke: #405551; transition: all 0.2s; }
 #__sw_flow_link_btn__.active svg { stroke: #0f4f50; transform: rotate(45deg); }
-#__sw_flow_link_btn__:hover, #__sw_flow_id__:hover { border-color: #116466; background: #b8ceca; }
+#__sw_flow_link_btn__:hover, #__sw_flow_id__:hover { border-color: #116466; background: #98b4af; }
 `;
 
 // SVG icons (feather-style)

@@ -492,6 +492,31 @@ function escapePsvCell(value: string): string {
   return value.replace(/\|/g, '\\|').replace(/\r?\n/g, '\\n');
 }
 
+function csvEscapeCell(value: string): string {
+  // CSV-like escaping for comma-separated values inside a single PSV cell.
+  // Wrap in double-quotes if the cell contains a comma, quote, or newline.
+  if (/[,"\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+function kvEscapeCell(value: string): string {
+  // Escaping for k=v pairs joined by ';' inside a single PSV cell.
+  // Quote when ambiguous (contains separators or quotes/newlines).
+  if (/[;=,"\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+function isScalarLike(value: unknown): value is string | number | boolean | bigint | null | undefined {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  );
+}
+
 function toScalar(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string') return value;
@@ -510,6 +535,33 @@ function flattenPsvRows(value: unknown, key = 'value', rows: Array<[string, stri
       rows.push([key, '']);
       return rows;
     }
+    if (value.every(isScalarLike)) {
+      const csv = value.map((v) => csvEscapeCell(toScalar(v))).join(',');
+      rows.push([`${key}[]`, csv]);
+      return rows;
+    }
+
+    // Common shape: [{ name, value }, ...] (e.g. fingerprints.allAttrs)
+    if (
+      value.every(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          !Array.isArray(item) &&
+          Object.prototype.hasOwnProperty.call(item, 'name') &&
+          Object.prototype.hasOwnProperty.call(item, 'value') &&
+          isScalarLike((item as any).name) &&
+          isScalarLike((item as any).value)
+      )
+    ) {
+      const csv = (value as Array<{ name: unknown; value: unknown }>)
+        .map((entry) => `${toScalar(entry.name)}=${toScalar(entry.value)}`)
+        .map(csvEscapeCell)
+        .join(',');
+      rows.push([`${key}[]`, csv]);
+      return rows;
+    }
+
     value.forEach((item, index) => {
       flattenPsvRows(item, `${key}[${index}]`, rows);
     });
@@ -522,6 +574,18 @@ function flattenPsvRows(value: unknown, key = 'value', rows: Array<[string, stri
       rows.push([key, '']);
       return rows;
     }
+
+    // If this object is a flat map of scalar values, keep it on one line to avoid noisy repetition
+    // like `selectors.primary`, `selectors.cssPath`, etc.
+    if (entries.every(([, childValue]) => isScalarLike(childValue))) {
+      const csv = entries
+        .map(([childKey, childValue]) => `${childKey}=${toScalar(childValue)}`)
+        .map(csvEscapeCell)
+        .join(',');
+      rows.push([key, csv]);
+      return rows;
+    }
+
     entries.forEach(([childKey, childValue]) => {
       const nextKey = key === 'value' ? childKey : `${key}.${childKey}`;
       flattenPsvRows(childValue, nextKey, rows);
@@ -533,9 +597,195 @@ function flattenPsvRows(value: unknown, key = 'value', rows: Array<[string, stri
   return rows;
 }
 
+function flattenToKvPairs(
+  value: unknown,
+  prefix: string,
+  pairs: Array<[string, string]>,
+  ctx?: { elementText?: string }
+): void {
+  if (value === null || value === undefined) {
+    pairs.push([prefix, '']);
+    return;
+  }
+
+  if (isScalarLike(value)) {
+    pairs.push([prefix, toScalar(value)]);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      pairs.push([`${prefix}[]`, '']);
+      return;
+    }
+    if (value.every(isScalarLike)) {
+      pairs.push([`${prefix}[]`, value.map((v) => csvEscapeCell(toScalar(v))).join(',')]);
+      return;
+    }
+    if (
+      value.every(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          !Array.isArray(item) &&
+          Object.prototype.hasOwnProperty.call(item, 'name') &&
+          Object.prototype.hasOwnProperty.call(item, 'value') &&
+          isScalarLike((item as any).name) &&
+          isScalarLike((item as any).value)
+      )
+    ) {
+      const csv = (value as Array<{ name: unknown; value: unknown }>)
+        .map((entry) => `${toScalar(entry.name)}=${toScalar(entry.value)}`)
+        .map(csvEscapeCell)
+        .join(',');
+      pairs.push([`${prefix}[]`, csv]);
+      return;
+    }
+    value.forEach((item, index) => {
+      flattenToKvPairs(item, `${prefix}[${index}]`, pairs, ctx);
+    });
+    return;
+  }
+
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+
+    // Special-case: attributes map => key[] as name=value CSV (minimal, stable for agents).
+    if (prefix.endsWith('attributes') || prefix === 'attributes') {
+      const entries = Object.entries(obj).filter(([, v]) => isScalarLike(v));
+      const csv = entries
+        .map(([k, v]) => `${k}=${toScalar(v)}`)
+        .map(csvEscapeCell)
+        .join(',');
+      pairs.push([`${prefix}[]`, csv]);
+      return;
+    }
+
+    // Special-case: DOMRect-like object => keep minimal fields, one key
+    if (prefix.endsWith('rect') || prefix === 'rect') {
+      const x = isScalarLike(obj.x) ? toScalar(obj.x) : '';
+      const y = isScalarLike(obj.y) ? toScalar(obj.y) : '';
+      const w = isScalarLike(obj.width) ? toScalar(obj.width) : '';
+      const h = isScalarLike(obj.height) ? toScalar(obj.height) : '';
+      const parts = [
+        x ? `x=${x}` : '',
+        y ? `y=${y}` : '',
+        w ? `w=${w}` : '',
+        h ? `h=${h}` : '',
+      ].filter(Boolean);
+      pairs.push([prefix, parts.join(',')]);
+      return;
+    }
+
+    // Special-case: selectors often repeats primary/cssPath
+    if (prefix.endsWith('selectors') || prefix === 'selectors') {
+      const primary = isScalarLike(obj.primary) ? toScalar(obj.primary) : '';
+      const cssPath = isScalarLike(obj.cssPath) ? toScalar(obj.cssPath) : '';
+      const xpath = isScalarLike(obj.xpath) ? toScalar(obj.xpath) : '';
+      const text = isScalarLike(obj.text) ? toScalar(obj.text) : '';
+
+      // Minimal selector payload: keep `primary` when present; otherwise fall back to cssPath/xpath.
+      if (primary) {
+        pairs.push([`${prefix}.primary`, primary]);
+      } else if (cssPath) {
+        pairs.push([`${prefix}.cssPath`, cssPath]);
+      } else if (xpath) {
+        pairs.push([`${prefix}.xpath`, xpath]);
+      }
+
+      // `selectors.text` is often redundant with element text; keep only if different and non-empty.
+      if (text && (!ctx?.elementText || text !== ctx.elementText)) pairs.push([`${prefix}.text`, text]);
+
+      const extraKeys = Object.keys(obj).filter((k) => !['primary', 'cssPath', 'xpath', 'text'].includes(k));
+      extraKeys.forEach((k) => {
+        const nextPrefix = `${prefix}.${k}`;
+        flattenToKvPairs(obj[k], nextPrefix, pairs, ctx);
+      });
+      return;
+    }
+
+    // Special-case: fingerprints => compress scalar hints, keep arrays separately
+    if (prefix === 'fingerprints') {
+      const scalarEntries = Object.entries(obj).filter(
+        ([k, v]) =>
+          k !== 'classList' &&
+          k !== 'allAttrs' &&
+          isScalarLike(v)
+      ) as Array<[string, string | number | boolean | bigint | null | undefined]>;
+      if (scalarEntries.length) {
+        const csv = scalarEntries
+          .map(([k, v]) => `${k}=${toScalar(v)}`)
+          .map(csvEscapeCell)
+          .join(',');
+        pairs.push([prefix, csv]);
+      }
+      if (Object.prototype.hasOwnProperty.call(obj, 'classList')) {
+        flattenToKvPairs(obj.classList, `${prefix}.classList`, pairs, ctx);
+      }
+      if (Object.prototype.hasOwnProperty.call(obj, 'allAttrs')) {
+        flattenToKvPairs(obj.allAttrs, `${prefix}.allAttrs`, pairs, ctx);
+      }
+      const extraKeys = Object.keys(obj).filter((k) => !['classList', 'allAttrs', ...scalarEntries.map(([k]) => k)].includes(k));
+      extraKeys.forEach((k) => {
+        flattenToKvPairs(obj[k], `${prefix}.${k}`, pairs, ctx);
+      });
+      return;
+    }
+
+    Object.entries(obj).forEach(([k, v]) => {
+      const nextPrefix = prefix ? `${prefix}.${k}` : k;
+      flattenToKvPairs(v, nextPrefix, pairs, ctx);
+    });
+    return;
+  }
+
+  // Fallback
+  pairs.push([prefix, toScalar(value)]);
+}
+
+function toCompactPsv(value: unknown): string {
+  const rows: Array<[string, string]> = [];
+  const header: [string, string] = ['path', 'data'];
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (isScalarLike(item)) {
+        rows.push([`value[${index}]`, toScalar(item)]);
+        return;
+      }
+
+      const elementText =
+        item && typeof item === 'object' && !Array.isArray(item)
+          ? (item as any)?.element?.text
+          : undefined;
+
+      const pairs: Array<[string, string]> = [];
+      flattenToKvPairs(item, '', pairs, { elementText: typeof elementText === 'string' ? elementText : undefined });
+      const compact = pairs
+        .filter(([k]) => k.length > 0)
+        .map(([k, v]) => `${k}=${kvEscapeCell(v)}`)
+        .join(';');
+      rows.push([`value[${index}]`, compact]);
+    });
+
+    return [header.join('|'), ...rows.map(([k, v]) => `${escapePsvCell(k)}|${escapePsvCell(v)}`)].join('\n');
+  }
+
+  if (isScalarLike(value)) {
+    return [header.join('|'), `value|${escapePsvCell(toScalar(value))}`].join('\n');
+  }
+
+  const pairs: Array<[string, string]> = [];
+  flattenToKvPairs(value, '', pairs);
+  const compact = pairs
+    .filter(([k]) => k.length > 0)
+    .map(([k, v]) => `${k}=${kvEscapeCell(v)}`)
+    .join(';');
+  return [header.join('|'), `value|${escapePsvCell(compact)}`].join('\n');
+}
+
 function toPsv(value: unknown): string {
-  const rows = flattenPsvRows(value);
-  return ['key|value', ...rows.map(([k, v]) => `${escapePsvCell(k)}|${escapePsvCell(v)}`)].join('\n');
+  return toCompactPsv(value);
 }
 
 function textResponse(data: unknown) {

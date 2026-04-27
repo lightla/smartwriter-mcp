@@ -168,7 +168,8 @@ function resolveElementFromTarget(target: string, forceFresh = false): HTMLEleme
 
   if (targetType === 'annotation') {
     const stepNum = parseInt(target.slice(2), 10);
-    const ann = swAnnotationsCache.find(a => a.stepNumber === stepNum);
+    const cache = swTabFlowEnabled ? swAllAnnotationsCache : swAnnotationsCache;
+    const ann = cache.find(a => a.stepNumber === stepNum);
     if (ann) {
       // CASCADE: Primary -> CSS Path -> XPath
       try { el = document.querySelector(ann.selectors.primary); } catch (_) {}
@@ -981,6 +982,7 @@ let swFocusModeOn = false; // Default OFF as requested
 let swMarkerFocusEl: HTMLElement | null = null;
 let swTabFlowEnabled = false; // Master Switch State
 let swCurrentTabId: number | null = null;
+let swSourceTabId: number | null = null;
 
 function handleToggleTracking(active: boolean, flowMarker?: string): unknown {
   swTrackingActive = active;
@@ -1342,6 +1344,7 @@ function swWidgetKeydown(e: KeyboardEvent): void {
 // --- Annotation Markers ---
 
 let swAnnotationsCache: SwAnnotation[] = [];
+let swAllAnnotationsCache: SwAnnotation[] = [];
 
 function swRefreshMarkers(): void {
   // SCIENTIFIC GATE: No markers allowed if tracking is not active for this tab
@@ -1353,6 +1356,7 @@ function swRefreshMarkers(): void {
 
   chrome.storage.local.get('smartwriterAnnotations', (result) => {
     const all: SwAnnotation[] = result.smartwriterAnnotations || [];
+    swAllAnnotationsCache = all;
     const tabScoped = getTabScopedAnnotations(all).sort((a, b) => (a.stepNumber ?? 0) - (b.stepNumber ?? 0));
     const currentUrl = window.location.href;
     swAnnotationsCache = tabScoped;
@@ -1703,10 +1707,12 @@ interface SwAnnotation {
   id: string;
   tabId?: number;
   url: string;
+  pageTitle?: string;
   timestamp: string;
   type: 'change' | 'step' | 'bug';
   note: string;
   stepNumber?: number;
+  trigger?: string;
   selectors: SwAnnotationSelectors;
   element: {
     tag: string;
@@ -1744,6 +1750,71 @@ function swGetNextStep(callback: (n: number) => void): void {
     const max = steps.reduce((m, a) => Math.max(m, a.stepNumber ?? 0), 0);
     callback(max + 1);
   });
+}
+
+function swGetMarkerForAnnotation(ann: SwAnnotation, all: SwAnnotation[]): string | null {
+  if (typeof ann.stepNumber === 'number' && Number.isInteger(ann.stepNumber) && ann.stepNumber > 0) {
+    return `a:${ann.stepNumber}`;
+  }
+  const idx = all.indexOf(ann);
+  if (idx >= 0) return `a:${idx + 1}`;
+  return null;
+}
+
+function swTryResolveAnnotationElement(ann: SwAnnotation): Element | null {
+  let el: Element | null = null;
+  try { el = document.querySelector(ann.selectors.primary); } catch (_) { /* ignore */ }
+  if (!el) {
+    try { el = document.querySelector(ann.selectors.cssPath); } catch (_) { /* ignore */ }
+  }
+  if (!el) {
+    try {
+      const result = document.evaluate(ann.selectors.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      el = result.singleNodeValue as Element | null;
+    } catch (_) { /* ignore */ }
+  }
+  return el;
+}
+
+function swIsTriggerTransition(prev: SwAnnotation, currentUrl: string, currentTitle: string): boolean {
+  if (prev.url !== currentUrl) return true;
+  if (typeof prev.pageTitle === 'string' && prev.pageTitle && prev.pageTitle !== currentTitle) return true;
+
+  // In Tab Flow, cross-tab transitions are meaningful triggers by definition.
+  if (swTabFlowEnabled && typeof prev.tabId === 'number' && typeof swCurrentTabId === 'number' && prev.tabId !== swCurrentTabId) {
+    return true;
+  }
+
+  const prevEl = swTryResolveAnnotationElement(prev);
+  return !(prevEl instanceof Element);
+}
+
+function swComputeTriggerForNewAnnotation(all: SwAnnotation[], nextStep: number, currentUrl: string, currentTitle: string): string | undefined {
+  if (all.length === 0) return undefined;
+
+  // Default "immediately before" step (step numbers are sequential).
+  const prevStep = nextStep - 1;
+  let prev = all.find((a) => a.stepNumber === prevStep);
+  if (!prev) {
+    prev = all
+      .filter((a) => typeof a.stepNumber === 'number' && (a.stepNumber as number) < nextStep)
+      .sort((a, b) => (b.stepNumber as number) - (a.stepNumber as number))[0];
+  }
+  if (!prev) return undefined;
+
+  // TabFlow enhancement: first annotation in a newly opened tab links back to the opener tab (if known).
+  if (swTabFlowEnabled && typeof swCurrentTabId === 'number' && typeof swSourceTabId === 'number') {
+    const hasAnyInThisTab = all.some((a) => typeof a.tabId === 'number' && a.tabId === swCurrentTabId);
+    if (!hasAnyInThisTab) {
+      const openerLatest = all
+        .filter((a) => typeof a.tabId === 'number' && a.tabId === swSourceTabId)
+        .sort((a, b) => (b.stepNumber ?? 0) - (a.stepNumber ?? 0))[0];
+      if (openerLatest) prev = openerLatest;
+    }
+  }
+
+  if (!swIsTriggerTransition(prev, currentUrl, currentTitle)) return undefined;
+  return swGetMarkerForAnnotation(prev, all) ?? undefined;
 }
 
 function swEscHtml(str: string): string {
@@ -1850,33 +1921,42 @@ function showAnnotationPopup(el: HTMLElement, clientX: number, clientY: number):
       const note = (document.getElementById('__sw_note_text__') as HTMLTextAreaElement).value.trim();
 
       const rect = el.getBoundingClientRect();
-      const annotation: SwAnnotation = {
-        id: `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        tabId: swCurrentTabId ?? undefined,
-        url: window.location.href,
-        timestamp: new Date().toISOString(),
-        type: selectedType,
-        note,
-        stepNumber: nextStep,
-        selectors,
-        element: {
-          tag: el.tagName.toLowerCase(),
-          text: el.textContent?.trim().substring(0, 200) || undefined,
-          classList: Array.from(el.classList).filter(c => !c.startsWith('__sw_')),
-          attributes: swGetRelevantAttrs(el),
-          rect: {
-            x: Math.round(rect.left + window.scrollX),
-            y: Math.round(rect.top + window.scrollY),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-          },
-        },
-        framework,
-      };
+      chrome.storage.local.get('smartwriterAnnotations', (result) => {
+        const all: SwAnnotation[] = result.smartwriterAnnotations || [];
+        const currentUrl = window.location.href;
+        const currentTitle = document.title || '';
+        const trigger = swComputeTriggerForNewAnnotation(all, nextStep, currentUrl, currentTitle);
 
-      swSaveAnnotation(annotation);
-      closePopup();
-      swShowToast(`Saved: ${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)}`);
+        const annotation: SwAnnotation = {
+          id: `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          tabId: swCurrentTabId ?? undefined,
+          url: currentUrl,
+          pageTitle: currentTitle,
+          timestamp: new Date().toISOString(),
+          type: selectedType,
+          note,
+          stepNumber: nextStep,
+          trigger,
+          selectors,
+          element: {
+            tag: el.tagName.toLowerCase(),
+            text: el.textContent?.trim().substring(0, 200) || undefined,
+            classList: Array.from(el.classList).filter(c => !c.startsWith('__sw_')),
+            attributes: swGetRelevantAttrs(el),
+            rect: {
+              x: Math.round(rect.left + window.scrollX),
+              y: Math.round(rect.top + window.scrollY),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
+          },
+          framework,
+        };
+
+        swSaveAnnotation(annotation);
+        closePopup();
+        swShowToast(`Saved: ${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)}`);
+      });
     });
   });
 }
@@ -1907,6 +1987,7 @@ chrome.runtime.sendMessage({
     swCurrentTabId = typeof res.senderTabId === 'number' ? res.senderTabId : null;
     swTabFlowEnabled = !!res.tabFlowEnabled;
     swTrackingActive = !!res.isTracking;
+    swSourceTabId = typeof res.sourceTabId === 'number' ? res.sourceTabId : null;
     swFocusModeOn = false; 
     syncWidgetVisibility(res.flowMarker);
   }

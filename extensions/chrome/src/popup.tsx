@@ -531,7 +531,7 @@ function PopupApp() {
         </div>
         <Button
           aria-label="Settings"
-          className={cn('bg-[#a9c5c0] text-[#16312e] hover:bg-[#bdd4d0] hover:text-[#061918]')}
+          className={cn('!bg-[#a9c5c0] !text-[#16312e] hover:!bg-[#7fa8a1] hover:!text-[#061918]')}
           onClick={() => setSettingsOpen((open) => !open)}
           size="icon"
           type="button"

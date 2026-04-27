@@ -89,10 +89,12 @@ export interface Annotation {
   id: string;
   tabId?: number;
   url: string;
+  pageTitle?: string;
   timestamp: string;
   type: AnnotationType;
   note: string;
   stepNumber?: number;
+  trigger?: string;
   selectors: AnnotationSelectors;
   element: AnnotationElement;
   framework: AnnotationFramework;

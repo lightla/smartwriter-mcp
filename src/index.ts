@@ -458,7 +458,7 @@ const TOOLS = [
   },
   {
     name: 'get_compact_annotations',
-    description: 'Get compact tracked annotations for the connected tab. Returns id|pageId|type|note plus pageId|url mapping.',
+    description: 'Get compact tracked annotations for the connected tab. Returns id|pageId|type|trigger|note plus pageId|url mapping.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -468,7 +468,7 @@ const TOOLS = [
   },
   {
     name: 'flow_get_compact_annotations',
-    description: 'Get compact tracked annotations across flow tabs. Returns id|pageId|flowId|type|note plus pageId|url mapping, sorted by annotation id.',
+    description: 'Get compact tracked annotations across flow tabs. Returns id|pageId|tabId|type|trigger|note plus pageId|url mapping, sorted by annotation id. tabId is a TabFlow marker like t:1 (not the raw Chrome tabId).',
     inputSchema: {
       type: 'object' as const,
       properties: {

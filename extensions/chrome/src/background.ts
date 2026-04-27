@@ -19,6 +19,7 @@ let tabFlowEnabled = false;
 let flowTabs: number[] = [];
 let trackingTabIds: number[] = []; 
 const connMap = new Map<number, ConnState>();
+const tabSourceTabId = new Map<number, number>();
 
 let isLoaded = false;
 const loadPromise = loadConfig().then(() => { isLoaded = true; });
@@ -171,9 +172,10 @@ function sortIndexedAnnotations(rows: IndexedAnnotation[]): IndexedAnnotation[] 
 function formatAnnotationSummaries(rows: IndexedAnnotation[]): string {
   const lines = toAnnotationRows(rows).map(({ annotation, markerNumber }) => {
     const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    return `${getAnnotationMarker(markerNumber)}|${annotation.type}|${note}`;
+    const trigger = (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim();
+    return `${getAnnotationMarker(markerNumber)}|${annotation.type}|${trigger}|${note}`;
   });
-  return ['id|type|note', ...lines].join('\n');
+  return ['id|type|trigger|note', ...lines].join('\n');
 }
 
 function getUrlLabelMap(rows: AnnotationRow[]): Map<string, string> {
@@ -190,9 +192,10 @@ function formatCompactAnnotationsForConnectedTab(rows: IndexedAnnotation[]): str
   const sortedRows = toAnnotationRows(rows);
   const urlLabels = getUrlLabelMap(sortedRows);
   const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
-  return ['id|pageId|type|note', ...sortedRows.map(({ annotation, markerNumber }) => {
+  return ['id|pageId|type|trigger|note', ...sortedRows.map(({ annotation, markerNumber }) => {
     const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${annotation.type}|${note}`;
+    const trigger = (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim();
+    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${annotation.type}|${trigger}|${note}`;
   }), 'pageId|url', ...urlLines].join('\n');
 }
 
@@ -213,10 +216,11 @@ function formatCompactAnnotationsGlobal(rows: IndexedAnnotation[], tabs: chrome.
   })));
   const lines = sorted.map(({ annotation, markerNumber, flowId }) => {
     const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${flowId ?? ''}|${annotation.type}|${note}`;
+    const trigger = (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim();
+    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${flowId ?? ''}|${annotation.type}|${trigger}|${note}`;
   });
   const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
-  return ['id|pageId|flowId|type|note', ...lines, 'pageId|url', ...urlLines].join('\n');
+  return ['id|pageId|tabId|type|trigger|note', ...lines, 'pageId|url', ...urlLines].join('\n');
 }
 
 function clearAnnotationsByUrl(urlFilter?: string): Promise<string> {
@@ -1014,7 +1018,7 @@ ${script}`;
 
     case 'GET_FLOW_TAB_IDS':
       if (!tabFlowEnabled) return flowDisabledResult();
-      return ['flowId', ...flowTabs.map((_, i) => `t:${i + 1}`)].join('\n');
+      return ['tabId', ...flowTabs.map((_, i) => `t:${i + 1}`)].join('\n');
 
     case 'GET_ELEMENT_BY_MARKER':
     case 'GET_COMPONENT_ORIGIN': {
@@ -1079,6 +1083,7 @@ async function onMessageHandler(request: any, _sender: chrome.runtime.MessageSen
       const senderTabId = _sender.tab?.id ?? null;
       return {
         senderTabId,
+        sourceTabId: senderTabId !== null ? (tabSourceTabId.get(senderTabId) ?? null) : null,
         tabFlowEnabled,
         isTracking: senderTabId !== null && trackingTabIds.includes(senderTabId),
         flowMarker: senderTabId !== null ? getFlowMarker(senderTabId) : null,
@@ -1226,6 +1231,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
+chrome.tabs.onCreated.addListener((tab) => {
+  if (typeof tab.id === 'number' && typeof tab.openerTabId === 'number') {
+    tabSourceTabId.set(tab.id, tab.openerTabId);
+  }
+});
+
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   // If in Tab Flow mode and switching to a flow tab, update connected ID
   if (tabFlowEnabled && flowTabs.includes(tabId)) {
@@ -1289,6 +1300,7 @@ chrome.storage.onChanged.addListener((changes) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  tabSourceTabId.delete(tabId);
   let changed = false;
   if (tabId === connectedTabId) {
     connectedTabId = null;

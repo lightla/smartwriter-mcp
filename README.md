@@ -92,8 +92,8 @@ Load `dist/` folder in Chrome:
 - wait_for(text, timeout?) → Wait for text to appear on page
 - get_text(selector) → Read text content from an element
 - get_attribute(selector, attribute) → Read an element attribute
-- get_compact_annotations(type?) → Read compact annotations for connected tab: id|pageId|type|note + pageId|url
-- flow_get_compact_annotations(type?) → Read compact annotations across flow tabs: id|pageId|flowId|type|note + pageId|url (sorted by annotation id)
+- get_compact_annotations(type?) → Read compact annotations for connected tab: id|pageId|type|trigger|note + pageId|url
+- flow_get_compact_annotations(type?) → Read compact annotations across flow tabs: id|pageId|tabId|type|trigger|note + pageId|url (sorted by annotation id). tabId is a TabFlow marker like t:1
 ```
 
 Annotation action flow keeps normal selectors working while allowing lower-token annotation markers:
@@ -103,8 +103,8 @@ Annotation action flow keeps normal selectors working while allowing lower-token
 - click({ selector: ".submit-button" })
 
 // Compact annotation path:
-- get_compact_annotations() → id|url|type|note
-                               a:1|p:1|change|Note 1
+- get_compact_annotations() → id|pageId|type|trigger|note
+                               a:1|p:1|change||Note 1
                                pageLabel|url
                                p:1|https://example.com/orders
 - click({ selector: "a:1" })

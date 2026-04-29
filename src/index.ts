@@ -160,6 +160,7 @@ const COMMAND_MAP: Record<string, string> = {
   evaluate: 'EVALUATE',
   screenshot: 'SCREENSHOT',
   get_snapshot: 'GET_SNAPSHOT',
+  get_compact_dom_snapshot: 'GET_SNAPSHOT',
   hover: 'HOVER',
   press_key: 'PRESS_KEY',
   wait_for: 'WAIT_FOR',
@@ -178,6 +179,7 @@ const COMMAND_MAP: Record<string, string> = {
   flow_get_compact_annotations: 'GET_GLOBAL_COMPACT_ANNOTATIONS',
   clear_all_anotations: 'CLEAR_ALL_ANOTATIONS',
   flow_clear_all_anotations: 'CLEAR_GLOBAL_ALL_ANOTATIONS',
+  tab_get_connected_info: 'GET_CONNECTED_TAB_INFO',
 };
 
 const TOOLS = [
@@ -302,7 +304,17 @@ const TOOLS = [
   },
   {
     name: 'get_snapshot',
-    description: 'Get accessibility snapshot of the current page',
+    description: 'Get compact DOM snapshot of the current page (token-efficient PSV)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a:1 from get_compact_annotations to scope snapshot' },
+      },
+    },
+  },
+  {
+    name: 'get_compact_dom_snapshot',
+    description: 'Get compact DOM snapshot of the current page (token-efficient PSV)',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -398,6 +410,11 @@ const TOOLS = [
   {
     name: 'tab_get_all_compact_info',
     description: 'Get compact flow tab info in PSV: tabId|tabTitle.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'tab_get_connected_info',
+    description: 'Get connected tab info in PSV: tabId|title|url|active.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {

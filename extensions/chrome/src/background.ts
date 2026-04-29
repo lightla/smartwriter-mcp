@@ -24,7 +24,8 @@ const tabSourceTabId = new Map<number, number>();
 let isLoaded = false;
 const loadPromise = loadConfig().then(() => { isLoaded = true; });
 const ANNOTATION_MARKER_PREFIX = 'a:';
-const LEGACY_ELEMENT_REF_PREFIX = 'el:';
+// Note: `el:<n>` is now used for element refs returned by snapshots.
+// Do not treat it as an annotation marker.
 const SELECTOR_COMMANDS = new Set([
   'TYPE',
   'FILL',
@@ -92,7 +93,6 @@ function getAnnotationMarker(index: number): string {
 function parseAnnotationMarker(value: string | undefined): number | null {
   if (!value) return null;
   if (value.startsWith(ANNOTATION_MARKER_PREFIX)) return parseAnnotationIndex(value.slice(ANNOTATION_MARKER_PREFIX.length));
-  if (value.startsWith(LEGACY_ELEMENT_REF_PREFIX)) return parseAnnotationIndex(value.slice(LEGACY_ELEMENT_REF_PREFIX.length));
   return null;
 }
 
@@ -657,19 +657,42 @@ async function sendContentCommand(tabId: number | null, command: string, args: R
     args.flowMarker = getFlowMarker(tabId) ?? undefined;
   }
 
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Command timeout: ${command}`)), 30000);
-    chrome.tabs.sendMessage(tabId, { type: command, ...args }, (response) => {
-      clearTimeout(timeout);
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else if (response?.success) {
-        resolve(response.data);
-      } else {
-        reject(new Error(response?.error || 'Unknown error'));
-      }
+  const sendOnce = () =>
+    new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(`Command timeout: ${command}`)), 30000);
+      chrome.tabs.sendMessage(tabId, { type: command, ...args }, (response) => {
+        clearTimeout(timeout);
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (response?.success) {
+          resolve(response.data);
+        } else {
+          reject(new Error(response?.error || 'Unknown error'));
+        }
+      });
     });
-  });
+
+  try {
+    return await sendOnce();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const missingReceiver =
+      message.includes('Receiving end does not exist') ||
+      message.includes('Could not establish connection') ||
+      message.includes('The message port closed before a response was received');
+
+    if (!missingReceiver) throw error;
+
+    // After extension reload, existing tabs may not have the content script injected yet.
+    await new Promise<void>((resolve, reject) => {
+      chrome.scripting.executeScript(
+        { target: { tabId }, files: ['content.js'] },
+        () => (chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve())
+      );
+    });
+
+    return await sendOnce();
+  }
 }
 
 async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: string): Promise<unknown> {
@@ -873,6 +896,17 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
             })
             .filter((row): row is string => row !== null);
           resolve(['tabId|tabTitle', ...rows].join('\n'));
+        });
+      });
+
+    case 'GET_CONNECTED_TAB_INFO':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      return new Promise((resolve) => {
+        chrome.tabs.get(connectedTabId!, (tab) => {
+          const title = (tab?.title || '').replace(/\r?\n/g, ' ').trim();
+          const url = tab?.url || '';
+          const active = tab?.active ? 'true' : 'false';
+          resolve(['tabId|title|url|active', `${connectedTabId}|${title}|${url}|${active}`].join('\n'));
         });
       });
 

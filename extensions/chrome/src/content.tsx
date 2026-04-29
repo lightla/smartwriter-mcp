@@ -1,10 +1,20 @@
 import type { ContentMessage, ContentResponse } from './types';
 
-const ELEMENT_REF_PREFIX = 'swref:';
-const elementRefStore = new Map<string, HTMLElement>();
+const ELEMENT_REF_PREFIX = 'el:';
+const elementRefStore = new Map<string, Element>();
 const selectorToRefStore = new Map<string, string>();
 let nextElementRefId = 1;
-type TargetType = 'annotation' | 'legacy_ref' | 'coords' | 'xpath' | 'css';
+
+type TmpTabDomSnapshotStorage = {
+  snapshotId: string;
+  createdAt: number;
+  url: string;
+  title: string;
+  refCount: number;
+};
+
+let tmpTabDomSnapshotStorage: TmpTabDomSnapshotStorage | null = null;
+type TargetType = 'annotation' | 'element_ref' | 'legacy_ref' | 'coords' | 'xpath' | 'css';
 
 
 chrome.runtime.onMessage.addListener(
@@ -114,12 +124,12 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
   }
 }
 
-function getOrCreateElementRef(el: HTMLElement, target?: string): string {
+function getOrCreateElementRef(el: Element, target?: string): string {
   if (target) {
     const existingRef = selectorToRefStore.get(target);
     if (existingRef) {
       const existing = elementRefStore.get(existingRef);
-      if (existing && existing.isConnected) return existingRef;
+      if (existing && (existing as any).isConnected) return existingRef;
     }
   }
 
@@ -129,17 +139,36 @@ function getOrCreateElementRef(el: HTMLElement, target?: string): string {
   return ref;
 }
 
-function getElementByRef(ref: string): HTMLElement {
+function getElementByRef(ref: string): Element {
   const el = elementRefStore.get(ref);
-  if (!el || !el.isConnected) {
+  if (!el || !(el as any).isConnected) {
     elementRefStore.delete(ref);
     throw new Error(`Element ref is stale or missing: ${ref}`);
   }
   return el;
 }
 
+function resetTmpTabDomSnapshotStorage(): void {
+  elementRefStore.clear();
+  selectorToRefStore.clear();
+  nextElementRefId = 1;
+  tmpTabDomSnapshotStorage = null;
+}
+
+function finalizeTmpTabDomSnapshotStorage(): void {
+  tmpTabDomSnapshotStorage = {
+    snapshotId: Math.random().toString(36).slice(2),
+    createdAt: Date.now(),
+    url: window.location.href,
+    title: document.title || '',
+    refCount: elementRefStore.size,
+  };
+}
+
 function detectTargetType(target: string): TargetType {
   if (/^a:\d+$/.test(target)) return 'annotation';
+  if (target.startsWith(ELEMENT_REF_PREFIX)) return 'element_ref';
+  // Backward-compat for old recorded element refs using data-sw-id
   if (/^el:[A-Za-z0-9_-]+$/.test(target)) return 'legacy_ref';
   if (/^\d+,\d+$/.test(target)) return 'coords';
   if (target.startsWith('//') || target.startsWith('/')) return 'xpath';
@@ -147,11 +176,14 @@ function detectTargetType(target: string): TargetType {
 }
 
 function resolveElementFromTarget(target: string, forceFresh = false): HTMLElement {
+  if (target.startsWith(ELEMENT_REF_PREFIX)) {
+    return getElementByRef(target) as HTMLElement;
+  }
   if (!forceFresh) {
     const cachedRef = selectorToRefStore.get(target);
     if (cachedRef) {
       const cachedEl = elementRefStore.get(cachedRef);
-      if (cachedEl && cachedEl.isConnected) return cachedEl;
+      if (cachedEl && (cachedEl as any).isConnected) return cachedEl as HTMLElement;
       selectorToRefStore.delete(target);
       elementRefStore.delete(cachedRef);
     }
@@ -201,16 +233,16 @@ function resolveElementFromTarget(target: string, forceFresh = false): HTMLEleme
     }
   }
 
-  if (!(el instanceof HTMLElement)) {
+  if (!(el instanceof Element)) {
     throw new Error(`Target not found for: ${target}`);
   }
   getOrCreateElementRef(el, target);
-  return el;
+  return el as HTMLElement;
 }
 
 function getElement(selector?: string, elementRef?: string): HTMLElement {
-  if (elementRef) return getElementByRef(elementRef);
-  if (selector && selector.startsWith(ELEMENT_REF_PREFIX)) return getElementByRef(selector);
+  if (elementRef) return getElementByRef(elementRef) as HTMLElement;
+  if (selector && selector.startsWith(ELEMENT_REF_PREFIX)) return getElementByRef(selector) as HTMLElement;
   if (!selector) throw new Error('Missing target. Expected selector or elementRef.');
   return resolveElementFromTarget(selector);
 }
@@ -361,15 +393,102 @@ async function evaluateScript(script: string, args: unknown[] = []): Promise<unk
   }
 }
 
-function getSnapshot(selector?: string, elementRef?: string): unknown {
+function compactText(input: string, maxLen: number): string {
+  return input.replace(/\s+/g, ' ').trim().slice(0, maxLen);
+}
+
+function getElementTextSnippet(element: Element, maxLen = 80): string {
+  const ownText = element.childElementCount === 0 ? element.textContent || '' : '';
+  if (ownText.trim()) return compactText(ownText, maxLen);
+
+  const aria = element.getAttribute('aria-label') || element.getAttribute('title') || '';
+  if (aria.trim()) return compactText(aria, maxLen);
+
+  if ((element as any).tagName?.toLowerCase() === 'input') {
+    const placeholder = element.getAttribute('placeholder') || '';
+    if (placeholder.trim()) return compactText(placeholder, maxLen);
+  }
+
+  return '';
+}
+
+function isElementVisible(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  return rect.height > 0 && rect.width > 0;
+}
+
+function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxNodes?: number }): string {
+  // Ensure `el:<n>` refs only refer to the current snapshot for this tab.
+  resetTmpTabDomSnapshotStorage();
+
+  const maxDepth = options?.maxDepth ?? 7;
+  const maxNodes = options?.maxNodes ?? 80;
+
+  const lines: string[] = [];
+  lines.push('meta|url|title');
+  lines.push(`meta|${window.location.href}|${compactText(document.title || '', 120)}`);
+
+  lines.push('tree|d|ref|tag|id|cls|role|name|text');
+
+  const queue: Array<{ el: Element; depth: number }> = [{ el: root, depth: 0 }];
+  let count = 0;
+
+  while (queue.length > 0 && count < maxNodes) {
+    const { el, depth } = queue.shift()!;
+    if (depth > maxDepth) continue;
+
+    const tag = el.tagName.toLowerCase();
+    const id = el.id || '';
+    const cls = safeClassName(el) || '';
+    const role = el.getAttribute('role') || '';
+    const name = el.getAttribute('aria-label') || '';
+    const text = getElementTextSnippet(el, 100);
+    const ref = getOrCreateElementRef(el);
+
+    lines.push(
+      `t|${depth}|${ref}|${tag}|${compactText(id, 60)}|${compactText(cls, 80)}|${compactText(role, 30)}|${compactText(
+        name,
+        60
+      )}|${compactText(text, 100)}`
+    );
+
+    count++;
+
+    // Enqueue a limited number of visible children to avoid blowing up output.
+    let added = 0;
+    for (let i = 0; i < el.children.length; i++) {
+      const child = el.children[i];
+      if (!isElementVisible(child)) continue;
+      queue.push({ el: child, depth: depth + 1 });
+      added++;
+      if (added >= 20) break;
+    }
+  }
+
+  // Add a compact endpoints section if the page contains method+URL patterns.
+  const pageText = (root as HTMLElement).innerText || document.body?.innerText || '';
+  const endpointMatches = Array.from(pageText.matchAll(/\b(GET|POST|PUT|PATCH|DELETE)\s+(https?:\/\/[^\s)]+)\b/g));
+  if (endpointMatches.length > 0) {
+    lines.push('endpoints|method|url');
+    const seen = new Set<string>();
+    for (const match of endpointMatches) {
+      const method = match[1];
+      const url = match[2];
+      const key = `${method} ${url}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(`e|${method}|${url}`);
+      if (seen.size >= 20) break;
+    }
+  }
+
+  finalizeTmpTabDomSnapshotStorage();
+  return lines.join('\n');
+}
+
+function getSnapshot(selector?: string, elementRef?: string): string {
   const root = (selector || elementRef) ? getElement(selector, elementRef) : document.documentElement;
-  const tree = buildA11yTree(root as HTMLElement);
-  return {
-    url: window.location.href,
-    title: document.title,
-    tree,
-    html: root.innerHTML ? root.innerHTML.substring(0, 5000) : '',
-  };
+  return getCompactDomTreePsv(root);
 }
 
 interface A11yNode {
@@ -383,7 +502,21 @@ interface A11yNode {
   className?: string;
 }
 
-function buildA11yTree(element: HTMLElement, maxDepth = 8): A11yNode {
+function safeClassName(element: Element): string | undefined {
+  const className = (element as any).className as unknown;
+  if (!className) return undefined;
+
+  if (typeof className === 'string') return className.substring(0, 100);
+  if (typeof (className as any).baseVal === 'string') return (className as any).baseVal.substring(0, 100);
+
+  try {
+    return String(className).substring(0, 100);
+  } catch {
+    return undefined;
+  }
+}
+
+function buildA11yTree(element: Element, maxDepth = 8): A11yNode {
   if (maxDepth <= 0) {
     return {
       tag: element.tagName.toLowerCase(),
@@ -400,12 +533,12 @@ function buildA11yTree(element: HTMLElement, maxDepth = 8): A11yNode {
     children: [],
     selector: getCssSelector(element),
     id: element.id || undefined,
-    className: element.className ? element.className.substring(0, 100) : undefined,
+    className: safeClassName(element),
   };
 
-  const visibleChildren: HTMLElement[] = [];
+  const visibleChildren: Element[] = [];
   for (let i = 0; i < element.children.length; i++) {
-    const child = element.children[i] as HTMLElement;
+    const child = element.children[i];
     const rect = child.getBoundingClientRect();
     if (rect.height > 0 && rect.width > 0) {
       visibleChildren.push(child);
@@ -420,7 +553,7 @@ function buildA11yTree(element: HTMLElement, maxDepth = 8): A11yNode {
   return node;
 }
 
-function getCssSelector(element: HTMLElement): string {
+function getCssSelector(element: Element): string {
   if (element.id) return `#${element.id}`;
 
   const path: string[] = [];

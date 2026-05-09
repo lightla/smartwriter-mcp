@@ -19,6 +19,11 @@ export type ContentMessage =
   | { type: 'GET_TEXT'; selector?: string; elementRef?: string }
   | { type: 'GET_ATTRIBUTE'; selector?: string; elementRef?: string; attribute: string }
   | { type: 'GET_ELEMENT_BY_MARKER'; selector?: string; elementRef?: string }
+  | { type: 'FIND_ELEMENT_BY_TEXT'; text: string; exact?: boolean }
+  | { type: 'SMART_SEARCH'; query: string }
+  | { type: 'GET_ELEMENT_COORDS'; selector?: string; elementRef?: string }
+  | { type: 'RESOLVE_TAGGED_ELEMENTS'; data: unknown }
+  | { type: 'SET_ACTION_MODE'; enabled: boolean }
   | { type: 'GET_COMPONENT_ORIGIN'; selector?: string; elementRef?: string }
   | { type: 'RESOLVE_TARGET'; target: string; force?: boolean }
   | { type: 'TOGGLE_TRACKING'; active: boolean; flowMarker?: string }

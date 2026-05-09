@@ -1793,6 +1793,17 @@ function swSetMarkersVisibility(visible: boolean): void {
   });
 }
 
+function swSetActionMode(enabled: boolean): void {
+  const CLASS = '__sw_action_mode__';
+  if (enabled) {
+    document.documentElement.classList.add(CLASS);
+    swActiveTip?.remove();
+    swActiveTip = null;
+  } else {
+    document.documentElement.classList.remove(CLASS);
+  }
+}
+
 function swUpdateCount(n: number): void {
   const badge = document.getElementById('__sw_badge__');
   if (badge) {

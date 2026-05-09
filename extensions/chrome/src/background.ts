@@ -961,9 +961,9 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
           resolve(['tabId|title|url|active', `${connectedTabId}|${title}|${url}|${active}`].join('\n'));
         });
       });
-case 'FIND_ELEMENT_BY_TEXT':
-  if (!connectedTabId) throw new Error('No tab connected.');
-  return sendContentCommand(connectedTabId, 'FIND_ELEMENT_BY_TEXT', args);
+    case 'FIND_ELEMENT_BY_TEXT':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      return sendContentCommand(connectedTabId, 'FIND_ELEMENT_BY_TEXT', args);
 
     case 'SMART_SEARCH': {
       if (!connectedTabId) throw new Error('No tab connected.');

@@ -398,18 +398,31 @@ function compactText(input: string, maxLen: number): string {
 }
 
 function getElementTextSnippet(element: Element, maxLen = 80): string {
-  const ownText = element.childElementCount === 0 ? element.textContent || '' : '';
-  if (ownText.trim()) return compactText(ownText, maxLen);
-
-  const aria = element.getAttribute('aria-label') || element.getAttribute('title') || '';
-  if (aria.trim()) return compactText(aria, maxLen);
-
-  if ((element as any).tagName?.toLowerCase() === 'input') {
-    const placeholder = element.getAttribute('placeholder') || '';
-    if (placeholder.trim()) return compactText(placeholder, maxLen);
+  const tagName = element.tagName.toLowerCase();
+  
+  // High priority text tags
+  const isTextContainer = ['a', 'button', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'p', 'label'].includes(tagName);
+  
+  let text = '';
+  if (isTextContainer) {
+    // For text containers, try innerText even if it has children
+    text = (element as HTMLElement).innerText || '';
+  } else if (element.childElementCount === 0) {
+    text = element.textContent || '';
+  }
+  
+  // Fallback to attributes if text is empty or very short
+  if (text.trim().length < 2) {
+    const attrText = element.getAttribute('title') || element.getAttribute('aria-label') || element.getAttribute('alt') || '';
+    if (attrText.trim()) text = attrText;
   }
 
-  return '';
+  if (tagName === 'input') {
+    const placeholder = element.getAttribute('placeholder') || '';
+    if (placeholder.trim()) text = placeholder;
+  }
+
+  return compactText(text, maxLen);
 }
 
 function isElementVisible(el: Element): boolean {
@@ -421,8 +434,8 @@ function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxN
   // Ensure `el:<n>` refs only refer to the current snapshot for this tab.
   resetTmpTabDomSnapshotStorage();
 
-  const maxDepth = options?.maxDepth ?? 7;
-  const maxNodes = options?.maxNodes ?? 80;
+  const maxDepth = options?.maxDepth ?? 10;
+  const maxNodes = options?.maxNodes ?? 200;
 
   const lines: string[] = [];
   lines.push('meta|url|title');

@@ -1021,8 +1021,15 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
 
     case 'EVALUATE': {
       if (!connectedTabId) throw new Error('No tab connected.');
-      const { marker, elementId, index } = args as { marker?: string; elementId?: string; index?: number | string };
-      let script = String(args.script ?? '');
+      const { marker, elementId, index, script, args: scriptArgs } = args as { 
+        marker?: string; 
+        elementId?: string; 
+        index?: number | string;
+        script?: string;
+        args?: unknown[];
+      };
+      
+      let finalScript = String(script ?? (args as any).script ?? '');
       let ref = marker ?? elementId;
       if (!ref && index !== undefined) {
         const parsedIndex = parseAnnotationIndex(index);
@@ -1030,11 +1037,11 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
       }
       if (ref) {
         const resolved = await resolveSelectorArgument(connectedTabId, ref);
-        script = `const element = document.querySelector(${JSON.stringify(resolved.selector)});
+        finalScript = `const element = document.querySelector(${JSON.stringify(resolved.selector)});
 if (!element) throw new Error(${JSON.stringify(`Element not found for index: ${resolved.index}`)});
-${script}`;
+${finalScript}`;
       }
-      return evaluateWithDebugger(connectedTabId, script, args.args as unknown[] | undefined);
+      return evaluateWithDebugger(connectedTabId, finalScript, scriptArgs || (args as any).args);
     }
 
     case 'HOVER':

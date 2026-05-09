@@ -512,13 +512,17 @@ function withCallback<T>(fn: (callback: (result?: T) => void) => void): Promise<
 
 async function evaluateWithDebugger(tabId: number, script: string, args?: unknown[]): Promise<unknown> {
   const target = { tabId };
-  const argBindings = (args ?? [])
-    .map((_, i) => `const arg${i} = __smartwriterArgs[${i}];`)
-    .join('\n');
-  const expression = `(async (...__smartwriterArgs) => {
+  let expression = script;
+
+  if (args && args.length > 0) {
+    const argBindings = (args ?? [])
+      .map((_, i) => `const arg${i} = __smartwriterArgs[${i}];`)
+      .join('\n');
+    expression = `(async (...__smartwriterArgs) => {
 ${argBindings}
 ${script}
 })(...${JSON.stringify(args ?? [])})`;
+  }
 
   await ensureDebuggerAttached(tabId);
   return evaluateInAttachedDebugger(target, expression, true);
@@ -562,7 +566,12 @@ async function evaluateInAttachedDebugger(
     throw new Error(`Script evaluation failed: ${description}`);
   }
 
-  return result.result?.value;
+  const remoteObj = result.result;
+  if (!remoteObj) return undefined;
+
+  if (remoteObj.value !== undefined) return remoteObj.value;
+  if (remoteObj.unserializableValue !== undefined) return remoteObj.unserializableValue;
+  return remoteObj.description || remoteObj.type;
 }
 
 async function resolveSelectorArgument(_tabId: number, selector: string): Promise<ResolvedSelector> {
@@ -909,6 +918,10 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
           resolve(['tabId|title|url|active', `${connectedTabId}|${title}|${url}|${active}`].join('\n'));
         });
       });
+
+    case 'FIND_ELEMENT_BY_TEXT':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      return sendContentCommand(connectedTabId, 'FIND_ELEMENT_BY_TEXT', args);
 
     case 'GET_DETAILED_ANNOTATIONS': {
       const { type } = args as { type?: string };
@@ -1374,10 +1387,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   sendTabsUpdate();
 });
 
-// Keep service worker alive and reconnect WebSocket every 25s
-chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
+chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive') connectAll();
+  if (alarm.name === "keepalive") connectAll();
 });
 
 setIcon(false);

@@ -180,16 +180,30 @@ const COMMAND_MAP: Record<string, string> = {
   clear_all_anotations: 'CLEAR_ALL_ANOTATIONS',
   flow_clear_all_anotations: 'CLEAR_GLOBAL_ALL_ANOTATIONS',
   tab_get_connected_info: 'GET_CONNECTED_TAB_INFO',
-};
+  find_element_by_text: 'FIND_ELEMENT_BY_TEXT',
+  };
 
-const TOOLS = [
+  const TOOLS = [
   {
     name: 'cli_list_tools',
     description: 'List all Smartwriter MCP tools and their descriptions',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
+    name: 'find_element_by_text',
+    description: 'Find an element by its text content or title/alt attributes and return its reference and details.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        text: { type: 'string', description: 'The text to search for (case-insensitive)' },
+        exact: { type: 'boolean', description: 'Whether to match the text exactly' },
+      },
+      required: ['text'],
+    },
+  },
+  {
     name: 'click',
+
     description: 'Click an element in the connected tab',
     inputSchema: {
       type: 'object' as const,

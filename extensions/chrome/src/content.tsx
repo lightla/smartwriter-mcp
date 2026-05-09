@@ -64,6 +64,9 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
       case 'EVALUATE':
         result = await evaluateScript(message.script, message.args);
         break;
+      case 'FIND_ELEMENT_BY_TEXT':
+        result = handleFindElementByText(message.text, message.exact);
+        break;
       case 'HOVER':
         result = await handleHover(message.selector, message.elementRef);
         break;
@@ -99,6 +102,9 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         break;
       case 'RESOLVE_TARGET':
         result = handleResolveTarget(message.target, message.force);
+        break;
+      case 'RESOLVE_TAGGED_ELEMENTS':
+        result = handleResolveTaggedElements(message.data);
         break;
       case 'UNREGISTER':
         result = { unregistered: true };
@@ -247,6 +253,86 @@ function getElement(selector?: string, elementRef?: string): HTMLElement {
   return resolveElementFromTarget(selector);
 }
 
+function handleFindElementByText(text: string, exact = false): unknown {
+  const target = text.toLowerCase().trim();
+  
+  // Get all potential containers, including those that might have fragmented text
+  const all = document.querySelectorAll('a, button, h1, h2, h3, h4, h5, h6, span, p, label, li, td, th, img');
+  
+  const matches: Element[] = [];
+  
+  all.forEach(el => {
+    // innerText is key here because it flattens text from all children: <b>a<span>b</span></b> -> "ab"
+    const elText = (el as HTMLElement).innerText?.toLowerCase() || '';
+    const elTitle = el.getAttribute('title')?.toLowerCase() || '';
+    const elAlt = el.getAttribute('alt')?.toLowerCase() || '';
+    
+    let isMatch = false;
+    if (exact) {
+      isMatch = elText === target || elTitle === target || elAlt === target;
+    } else {
+      isMatch = elText.includes(target) || elTitle.includes(target) || elAlt.includes(target);
+    }
+    
+    if (isMatch) {
+      matches.push(el);
+    }
+  });
+
+  if (matches.length > 0) {
+    // Strategy: Pick the "smallest" element that contains the text to be precise
+    // We sort by how many children they have (preferring fewer) and then by area
+    const found = matches.sort((a, b) => {
+      const aLen = a.querySelectorAll('*').length;
+      const bLen = b.querySelectorAll('*').length;
+      if (aLen !== bLen) return aLen - bLen;
+      
+      const aRect = a.getBoundingClientRect();
+      const bRect = b.getBoundingClientRect();
+      return (aRect.width * aRect.height) - (bRect.width * bRect.height);
+    })[0];
+
+    return {
+      elementRef: getOrCreateElementRef(found),
+      tagName: found.tagName,
+      className: found.className,
+      text: getElementTextSnippet(found, 100)
+    };
+  }
+  
+  throw new Error(`Element with text "${text}" not found (searched text and attributes)`);
+}
+
+function handleResolveTaggedElements(data: unknown): unknown {
+  if (data !== null && typeof data === 'object') {
+    const obj = data as any;
+    if (obj.__sw_id) {
+      const el = document.querySelector(`[data-smartwriter-id="${obj.__sw_id}"]`);
+      if (el) {
+        el.removeAttribute('data-smartwriter-id');
+        return {
+          elementRef: getOrCreateElementRef(el),
+          tagName: el.tagName,
+          className: el.className,
+          text: getElementTextSnippet(el, 100)
+        };
+      }
+      return { error: 'Element lost after tagging' };
+    }
+
+    if (Array.isArray(data)) {
+      return data.map(item => handleResolveTaggedElements(item));
+    }
+
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      result[key] = handleResolveTaggedElements(val);
+    }
+    return result;
+  }
+  return data;
+}
+
 function handleResolveTarget(target: string, force = false): unknown {
   const targetType = detectTargetType(target);
   const element = resolveElementFromTarget(target, force);
@@ -379,6 +465,35 @@ async function handleUncheck(selector?: string, elementRef?: string): Promise<un
   return { unchecked: true, selector: selector ?? resolvedRef, elementRef: resolvedRef };
 }
 
+function processEvaluationResult(value: unknown): unknown {
+  if (value instanceof Element) {
+    return {
+      elementRef: getOrCreateElementRef(value),
+      tagName: value.tagName,
+      className: value.className,
+      text: getElementTextSnippet(value, 100)
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(item => processEvaluationResult(item));
+  }
+
+  if (value !== null && typeof value === 'object') {
+    // Avoid circular refs or heavy objects by checking if it's a plain object
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      const result: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(value)) {
+        result[key] = processEvaluationResult(val);
+      }
+      return result;
+    }
+  }
+
+  return value;
+}
+
 async function evaluateScript(script: string, args: unknown[] = []): Promise<unknown> {
   try {
     const argNames = (args || []).map((_, i) => `arg${i}`);
@@ -401,7 +516,7 @@ function getElementTextSnippet(element: Element, maxLen = 80): string {
   const tagName = element.tagName.toLowerCase();
   
   // High priority text tags
-  const isTextContainer = ['a', 'button', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'p', 'label'].includes(tagName);
+  const isTextContainer = ['a', 'button', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'p', 'label', 'li', 'td', 'th'].includes(tagName);
   
   let text = '';
   if (isTextContainer) {
@@ -426,8 +541,16 @@ function getElementTextSnippet(element: Element, maxLen = 80): string {
 }
 
 function isElementVisible(el: Element): boolean {
+  if (el.tagName.toLowerCase() === 'html' || el.tagName.toLowerCase() === 'body') return true;
   const rect = el.getBoundingClientRect();
-  return rect.height > 0 && rect.width > 0;
+  if (rect.width > 0 && rect.height > 0) return true;
+  
+  // If rect is 0, it might still be visible if it has visible children or is a text container
+  if (['a', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'].includes(el.tagName.toLowerCase())) {
+    return el.textContent?.trim().length ? true : false;
+  }
+  
+  return false;
 }
 
 function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxNodes?: number }): string {
@@ -435,7 +558,7 @@ function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxN
   resetTmpTabDomSnapshotStorage();
 
   const maxDepth = options?.maxDepth ?? 10;
-  const maxNodes = options?.maxNodes ?? 200;
+  const maxNodes = options?.maxNodes ?? 800;
 
   const lines: string[] = [];
   lines.push('meta|url|title');

@@ -181,6 +181,8 @@ const COMMAND_MAP: Record<string, string> = {
   flow_clear_all_anotations: 'CLEAR_GLOBAL_ALL_ANOTATIONS',
   tab_get_connected_info: 'GET_CONNECTED_TAB_INFO',
   find_element_by_text: 'FIND_ELEMENT_BY_TEXT',
+  smart_search: 'SMART_SEARCH',
+  press_enter: 'PRESS_ENTER',
   };
 
   const TOOLS = [
@@ -190,7 +192,13 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
+    name: 'press_enter',
+    description: 'Press the Enter key physically on the currently focused element.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
     name: 'find_element_by_text',
+
     description: 'Find an element by its text content or title/alt attributes and return its reference and details.',
     inputSchema: {
       type: 'object' as const,
@@ -202,8 +210,18 @@ const COMMAND_MAP: Record<string, string> = {
     },
   },
   {
+    name: 'smart_search',
+    description: 'Automatically find the search bar on the page, type the query, and submit it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'The search term to enter' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'click',
-
     description: 'Click an element in the connected tab',
     inputSchema: {
       type: 'object' as const,

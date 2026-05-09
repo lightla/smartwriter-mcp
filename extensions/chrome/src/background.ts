@@ -407,6 +407,10 @@ function setIcon(connected: boolean): void {
   }).catch(() => {});
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function connectToPort(cfg: ServerConfig): void {
   const { port } = cfg;
   let state = connMap.get(port);
@@ -704,27 +708,14 @@ async function sendContentCommand(tabId: number | null, command: string, args: R
   }
 }
 
-async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: string): Promise<unknown> {
+async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: string, elementRef?: string): Promise<unknown> {
   const target = { tabId };
   await ensureDebuggerAttached(tabId);
   try {
-    // Get element center + scroll into view
-    const posResult = await withCallback<DebuggerEvaluateResult>((cb) =>
-      chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
-        expression: `(() => {
-          const el = document.querySelector(${JSON.stringify(selector)});
-          if (!el) return null;
-          el.scrollIntoView({ behavior: 'instant', block: 'center' });
-          const r = el.getBoundingClientRect();
-          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-        })()`,
-        returnByValue: true,
-      }, cb)
-    );
-    const pos = posResult.result?.value as { x: number; y: number } | null;
-    if (!pos) throw new Error(`Element not found: ${selector}`);
-
-    // Animate dot from previous position to target
+    // Get absolute coordinates from content script (which has access to elementRefStore)
+    const pos = (await sendContentCommand(tabId, 'GET_ELEMENT_COORDS', { selector, elementRef })) as { x: number; y: number };
+    
+    // Draw/Move the red dot at those coordinates
     await withCallback<DebuggerEvaluateResult>((cb) =>
       chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
         expression: `(() => {
@@ -734,65 +725,117 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
             dot = document.createElement('div');
             dot.id = DOT_ID;
             Object.assign(dot.style, {
-              position: 'fixed', width: '20px', height: '20px', borderRadius: '50%',
-              background: '#a6d0c4', border: '2px solid #116466',
-              boxShadow: '0 0 0 4px rgba(17,100,102,0.18)',
+              position: 'fixed', width: '16px', height: '16px', borderRadius: '50%',
+              background: '#ff0000', border: '2px solid white',
+              boxShadow: '0 0 10px rgba(0,0,0,0.5)',
               pointerEvents: 'none', zIndex: '2147483647',
               transform: 'translate(-50%,-50%)',
-              transition: 'left 0.1s ease, top 0.1s ease',
+              transition: 'left 0.2s ease, top 0.2s ease',
+              display: 'block'
             });
-            document.body.appendChild(dot);
-            dot.style.left = ${pos.x} + 'px';
-            dot.style.top = ${pos.y} + 'px';
+            (document.documentElement || document.body).appendChild(dot);
           }
-          requestAnimationFrame(() => {
-            dot.style.left = ${pos.x} + 'px';
-            dot.style.top = ${pos.y} + 'px';
-          });
+          dot.style.left = ${pos.x} + 'px';
+          dot.style.top = ${pos.y} + 'px';
         })()`,
         returnByValue: false,
       }, cb)
     );
 
-    // Wait for animation
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for dot movement
+    await new Promise((r) => setTimeout(r, 200));
 
     if (command === 'CLICK') {
-      // Pulse animation on click
+      // Pulse animation
       await withCallback<DebuggerEvaluateResult>((cb) =>
         chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
           expression: `(() => {
             const dot = document.getElementById('__sw_cursor__');
             if (dot) {
-              dot.style.transition = 'transform 0.1s ease, opacity 0.1s ease';
-              dot.style.transform = 'translate(-50%,-50%) scale(1.8)';
-              dot.style.opacity = '0.5';
+              dot.style.transform = 'translate(-50%,-50%) scale(2)';
+              dot.style.backgroundColor = '#ffff00';
               setTimeout(() => {
                 dot.style.transform = 'translate(-50%,-50%) scale(1)';
-                dot.style.opacity = '1';
-                dot.style.transition = 'left 0.35s cubic-bezier(.4,0,.2,1), top 0.35s cubic-bezier(.4,0,.2,1), transform 0.15s ease, opacity 0.15s ease';
-              }, 150);
+                dot.style.backgroundColor = '#ff0000';
+              }, 200);
             }
           })()`,
           returnByValue: false,
         }, cb)
       );
-      await new Promise((r) => setTimeout(r, 30));
+      
       await withCallback<unknown>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );
       await withCallback<unknown>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );
-      return { clicked: true, selector, x: pos.x, y: pos.y };
+      return { clicked: true, x: pos.x, y: pos.y };
     }
-
-    return { hovered: true, selector, x: pos.x, y: pos.y };
+    return { hovered: true, x: pos.x, y: pos.y };
   } catch (e) {
-    attachedDebuggerTabId = null;
-    await withCallback<void>((cb) => chrome.debugger.detach(target, cb)).catch(() => {});
     throw e;
   }
+}
+
+async function typeText(tabId: number, text: string): Promise<void> {
+  const target = { tabId };
+  await ensureDebuggerAttached(tabId);
+  for (const char of text) {
+    await withCallback<void>((cb) => 
+      chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        text: char,
+        unmodifiedText: char,
+      }, cb)
+    );
+    await withCallback<void>((cb) => 
+      chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        text: char,
+        unmodifiedText: char,
+      }, cb)
+    );
+    await delay(20);
+  }
+}
+
+async function pressKey(tabId: number, key: string): Promise<void> {
+  const target = { tabId };
+  await ensureDebuggerAttached(tabId);
+  const keyCode = key === 'Enter' ? 13 : 0;
+  
+  await withCallback<void>((cb) => 
+    chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      key: key,
+      code: key,
+      windowsVirtualKeyCode: keyCode,
+      nativeVirtualKeyCode: keyCode,
+    }, cb)
+  );
+  
+  if (key === 'Enter') {
+    await withCallback<void>((cb) => 
+      chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+        type: 'char',
+        text: '\r',
+        unmodifiedText: '\r',
+      }, cb)
+    );
+  }
+
+  await new Promise(r => setTimeout(r, 50));
+
+  await withCallback<void>((cb) => 
+    chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: key,
+      code: key,
+      windowsVirtualKeyCode: keyCode,
+      nativeVirtualKeyCode: keyCode,
+    }, cb)
+  );
 }
 
 function getFlowMarker(tabId: number): string | null {
@@ -918,11 +961,76 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
           resolve(['tabId|title|url|active', `${connectedTabId}|${title}|${url}|${active}`].join('\n'));
         });
       });
+case 'FIND_ELEMENT_BY_TEXT':
+  if (!connectedTabId) throw new Error('No tab connected.');
+  return sendContentCommand(connectedTabId, 'FIND_ELEMENT_BY_TEXT', args);
 
-    case 'FIND_ELEMENT_BY_TEXT':
+    case 'SMART_SEARCH': {
       if (!connectedTabId) throw new Error('No tab connected.');
-      return sendContentCommand(connectedTabId, 'FIND_ELEMENT_BY_TEXT', args);
+      const { query } = args as { query: string };
+      
+      // 1. Capture Initial State (URL + DOM Summary) - Use debugger to bypass CSP
+      const initialTab = await getTab(connectedTabId);
+      const initialUrl = initialTab?.url || '';
+      const initialDom = (await evaluateWithDebugger(connectedTabId, 
+        "document.body.innerText.length + '-' + document.querySelectorAll('*').length" 
+      )) as string;
 
+      const prep = (await sendContentCommand(connectedTabId, 'SMART_SEARCH', args)) as { 
+        inputRef: string; 
+        submitBtnRef?: string;
+      };
+      
+      // 2. Focus and Type
+      await mouseAction(connectedTabId, 'CLICK', '', prep.inputRef);
+      await delay(100);
+      await typeText(connectedTabId, query);
+      await delay(300);
+      
+      // 3. Multi-strategy Submission Loop
+      const strategies = [
+        async () => {
+          await pressKey(connectedTabId, 'Enter');
+          return 'enter_key';
+        },
+        async () => {
+          if (prep.submitBtnRef) {
+            await mouseAction(connectedTabId, 'CLICK', '', prep.submitBtnRef);
+            return 'button_click';
+          }
+          return null;
+        }
+      ];
+
+      for (const strategy of strategies) {
+        const method = await strategy();
+        if (!method) continue;
+
+        // Wait and check for changes (URL or DOM)
+        for (let i = 0; i < 10; i++) {
+          await delay(200);
+          const currentTab = await getTab(connectedTabId);
+          const currentDom = (await evaluateWithDebugger(connectedTabId, 
+            "document.body.innerText.length + '-' + document.querySelectorAll('*').length" 
+          )) as string;
+
+          if (currentTab && currentTab.url !== initialUrl) {
+            return { searched: true, status: 'navigated', method, newUrl: currentTab.url };
+          }
+          if (currentDom !== initialDom) {
+            // Check if the query text is now on the page (indicating results)
+            const isQueryPresent = (await evaluateWithDebugger(connectedTabId, 
+              `document.body.innerText.toLowerCase().includes(${JSON.stringify(query.toLowerCase())})` 
+            )) as boolean;
+            if (isQueryPresent) {
+              return { searched: true, status: 'content_updated', method, detail: 'Local search results detected.' };
+            }
+          }
+        }
+      }
+      
+      return { searched: true, status: 'no_change_detected', detail: 'Typed query but no navigation or content change observed.' };
+    }
     case 'GET_DETAILED_ANNOTATIONS': {
       const { type } = args as { type?: string };
       if (!connectedTabId) throw new Error('No tab connected.');
@@ -1062,7 +1170,9 @@ ${finalScript}`;
       if (!connectedTabId) throw new Error('No tab connected.');
       const selector = String(args.selector ?? '');
       try {
-        const { result, resolved } = await executeTargetCommandWithAutoReresolve(connectedTabId, command, args, selector);
+        const resolved = await resolveSelectorArgument(connectedTabId, selector);
+        // Use real physical mouse action via CDP, supporting elementRef directly
+        const result = await mouseAction(connectedTabId, command as 'HOVER' | 'CLICK', resolved.selector, (args as any).elementRef);
         return scrubSelectorResult(result, resolved);
       } catch (error) {
         const resolved = await resolveSelectorArgument(connectedTabId, selector);
@@ -1070,11 +1180,29 @@ ${finalScript}`;
       }
     }
 
-    case 'GET_FLOW_TAB_IDS':
-      if (!tabFlowEnabled) return flowDisabledResult();
-      return ['tabId', ...flowTabs.map((_, i) => `t:${i + 1}`)].join('\n');
+    case 'TYPE': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { text, selector } = args as { text: string; selector?: string };
+      if (selector) {
+        const resolved = await resolveSelectorArgument(connectedTabId, selector);
+        await mouseAction(connectedTabId, 'CLICK', resolved.selector, (args as any).elementRef);
+        await delay(100);
+      }
+      await typeText(connectedTabId, text);
+      return { typed: true, text };
+    }
 
-    case 'GET_ELEMENT_BY_MARKER':
+    case 'PRESS_KEY': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { key } = args as { key: string };
+      await pressKey(connectedTabId, key);
+      return { pressed: true, key };
+    }
+
+    case 'PRESS_ENTER':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      await pressKey(connectedTabId, 'Enter');
+      return { pressed: true, key: 'Enter' };
     case 'GET_COMPONENT_ORIGIN': {
       if (!connectedTabId) throw new Error('No tab connected.');
       const selector = String(args.selector ?? '');
@@ -1330,7 +1458,6 @@ chrome.storage.onChanged.addListener((changes) => {
   }
 
   if (needsBroadcast) {
-    // SCIENTIFIC BROADCAST: Notify every single tab about the state change
     chrome.tabs.query({}, (tabs) => {
       for (const tab of tabs) {
         if (tab.id) {
@@ -1338,13 +1465,6 @@ chrome.storage.onChanged.addListener((changes) => {
             type: 'TAB_FLOW_STATE_CHANGE', 
             enabled: tabFlowEnabled, 
             flowMarker: getFlowMarker(tab.id) ?? undefined 
-          }).catch(() => {});
-          
-          // Also sync manual tracking state
-          chrome.tabs.sendMessage(tab.id, {
-            type: 'TOGGLE_TRACKING',
-            active: trackingTabIds.includes(tab.id),
-            flowMarker: getFlowMarker(tab.id) ?? undefined
           }).catch(() => {});
         }
       }
@@ -1360,36 +1480,20 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     connectedTabId = null;
     changed = true;
   }
-  const oldLen = flowTabs.length;
   flowTabs = flowTabs.filter(id => id !== tabId);
-  if (flowTabs.length !== oldLen) changed = true;
-  
-  const oldTrackLen = trackingTabIds.length;
   trackingTabIds = trackingTabIds.filter(id => id !== tabId);
-  if (trackingTabIds.length !== oldTrackLen) changed = true;
-
-  if (changed) {
-    chrome.storage.local.set({ 
-      smartwriterTabId: connectedTabId,
-      smartwriterFlowTabs: flowTabs,
-      smartwriterTrackingTabs: trackingTabIds
-    });
-    // SCIENTIFIC SYNC: Notify all remaining flow tabs to update their Flow ID markers
-    for (const id of flowTabs) {
-      chrome.tabs.sendMessage(id, { 
-        type: 'TAB_FLOW_STATE_CHANGE', 
-        enabled: tabFlowEnabled, 
-        flowMarker: getFlowMarker(id) ?? undefined 
-      }).catch(() => {});
-    }
-  }
+  chrome.storage.local.set({ 
+    smartwriterTabId: connectedTabId,
+    smartwriterFlowTabs: flowTabs,
+    smartwriterTrackingTabs: trackingTabIds
+  });
   updateIcon();
   sendTabsUpdate();
 });
 
-chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
+chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "keepalive") connectAll();
+  if (alarm.name === 'keepalive') connectAll();
 });
 
 setIcon(false);

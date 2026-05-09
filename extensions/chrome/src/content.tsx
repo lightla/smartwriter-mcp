@@ -67,6 +67,9 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
       case 'FIND_ELEMENT_BY_TEXT':
         result = handleFindElementByText(message.text, message.exact);
         break;
+      case 'SMART_SEARCH':
+        result = await handleSmartSearch(message.query);
+        break;
       case 'HOVER':
         result = await handleHover(message.selector, message.elementRef);
         break;
@@ -90,6 +93,15 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         break;
       case 'GET_TEXT':
         result = getText(message.selector, message.elementRef);
+        break;
+      case 'GET_ELEMENT_COORDS':
+        const el = getElement(message.selector, message.elementRef);
+        el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        const r = el.getBoundingClientRect();
+        result = { 
+          x: Math.round(r.left + r.width / 2), 
+          y: Math.round(r.top + r.height / 2) 
+        };
         break;
       case 'GET_ATTRIBUTE':
         result = getAttribute(message.selector, message.elementRef, message.attribute);
@@ -251,6 +263,60 @@ function getElement(selector?: string, elementRef?: string): HTMLElement {
   if (selector && selector.startsWith(ELEMENT_REF_PREFIX)) return getElementByRef(selector) as HTMLElement;
   if (!selector) throw new Error('Missing target. Expected selector or elementRef.');
   return resolveElementFromTarget(selector);
+}
+
+async function handleSmartSearch(query: string): Promise<unknown> {
+  const searchSelectors = [
+    'input[type="search"]',
+    'input[name="q"]',
+    'input[name="search"]',
+    'input[id*="search"]',
+    'input[class*="search"]',
+    'input[placeholder*="search" i]',
+    'input[placeholder*="tìm kiếm" i]'
+  ];
+
+  let input = document.querySelector(searchSelectors.join(',')) as HTMLInputElement | null;
+
+  // If input not found or not visible, it might be behind a toggle
+  if (!input || !isElementVisible(input)) {
+    const toggles = document.querySelectorAll('button[class*="search"], div[class*="search"], a[class*="search"], .icon-search');
+    for (const toggle of Array.from(toggles)) {
+      if (isElementVisible(toggle as Element)) {
+        (toggle as HTMLElement).click();
+        await delay(500); // Wait for animation/reveal
+        input = document.querySelector(searchSelectors.join(',')) as HTMLInputElement | null;
+        if (input && isElementVisible(input)) break;
+      }
+    }
+  }
+
+  if (!input) {
+    throw new Error('Could not automatically identify a search bar on this page.');
+  }
+
+  input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  input.focus();
+  // Clear existing text first
+  input.value = '';
+  dispatchInputEvents(input);
+  await delay(100);
+
+  // Find a submit button if it exists
+  let submitBtnRef: string | undefined;
+  const parent = input.parentElement;
+  if (parent) {
+    const submitBtn = parent.querySelector('button, input[type="submit"], .btn-search, i.fa-search');
+    if (submitBtn && isElementVisible(submitBtn)) {
+      submitBtnRef = getOrCreateElementRef(submitBtn);
+    }
+  }
+
+  return { 
+    ready: true, 
+    inputRef: getOrCreateElementRef(input),
+    submitBtnRef 
+  };
 }
 
 function handleFindElementByText(text: string, exact = false): unknown {

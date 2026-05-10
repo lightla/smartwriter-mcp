@@ -350,24 +350,18 @@ function handleFindElementByText(text: string, exact = false): unknown {
   });
 
   if (matches.length > 0) {
-    // Strategy: Pick the "smallest" element that contains the text to be precise
-    // We sort by how many children they have (preferring fewer) and then by area
     const found = matches.sort((a, b) => {
       const aLen = a.querySelectorAll('*').length;
       const bLen = b.querySelectorAll('*').length;
       if (aLen !== bLen) return aLen - bLen;
-      
       const aRect = a.getBoundingClientRect();
       const bRect = b.getBoundingClientRect();
       return (aRect.width * aRect.height) - (bRect.width * bRect.height);
     })[0];
-
-    return {
-      elementRef: getOrCreateElementRef(found),
-      tagName: found.tagName,
-      className: found.className,
-      text: getElementTextSnippet(found, 100)
-    };
+    const ref = getOrCreateElementRef(found);
+    const tag = found.tagName.toLowerCase();
+    const text = getElementTextSnippet(found, 100);
+    return `${ref} ${tag} "${text.replace(/"/g, '\\"')}"`;
   }
   
   throw new Error(`Element with text "${text}" not found (searched text and attributes)`);
@@ -630,17 +624,11 @@ function isElementVisible(el: Element): boolean {
 }
 
 function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxNodes?: number }): string {
-  // Ensure `el:<n>` refs only refer to the current snapshot for this tab.
   resetTmpTabDomSnapshotStorage();
-
   const maxDepth = options?.maxDepth ?? 10;
   const maxNodes = options?.maxNodes ?? 800;
-
   const lines: string[] = [];
-  lines.push('meta|url|title');
-  lines.push(`meta|${window.location.href}|${compactText(document.title || '', 120)}`);
-
-  lines.push('tree|d|ref|tag|id|cls|role|name|text');
+  lines.push(`@ ${compactText(document.title || '', 120)} | ${window.location.href}`);
 
   const queue: Array<{ el: Element; depth: number }> = [{ el: root, depth: 0 }];
   let count = 0;
@@ -650,23 +638,23 @@ function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxN
     if (depth > maxDepth) continue;
 
     const tag = el.tagName.toLowerCase();
-    const id = el.id || '';
-    const cls = safeClassName(el) || '';
-    const role = el.getAttribute('role') || '';
-    const name = el.getAttribute('aria-label') || '';
-    const text = getElementTextSnippet(el, 100);
+    if (['script', 'style', 'noscript', 'template', 'svg', 'br', 'hr'].includes(tag)) continue;
+    if (!isElementVisible(el)) continue;
+
     const ref = getOrCreateElementRef(el);
+    let line = `${ref} ${tag}`;
+    if (el.id) line += `#${el.id}`;
+    const cls = safeClassName(el);
+    if (cls) {
+      const classes = cls.split(/\s+/).filter(c => c.length > 0).slice(0, 3);
+      if (classes.length) line += '.' + classes.join('.');
+    }
+    const text = getElementTextSnippet(el, 80);
+    if (text) line += ` "${text.replace(/"/g, '\\"')}"`;
 
-    lines.push(
-      `t|${depth}|${ref}|${tag}|${compactText(id, 60)}|${compactText(cls, 80)}|${compactText(role, 30)}|${compactText(
-        name,
-        60
-      )}|${compactText(text, 100)}`
-    );
-
+    lines.push('  '.repeat(depth) + line);
     count++;
 
-    // Enqueue a limited number of visible children to avoid blowing up output.
     let added = 0;
     for (let i = 0; i < el.children.length; i++) {
       const child = el.children[i];
@@ -674,23 +662,6 @@ function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxN
       queue.push({ el: child, depth: depth + 1 });
       added++;
       if (added >= 20) break;
-    }
-  }
-
-  // Add a compact endpoints section if the page contains method+URL patterns.
-  const pageText = (root as HTMLElement).innerText || document.body?.innerText || '';
-  const endpointMatches = Array.from(pageText.matchAll(/\b(GET|POST|PUT|PATCH|DELETE)\s+(https?:\/\/[^\s)]+)\b/g));
-  if (endpointMatches.length > 0) {
-    lines.push('endpoints|method|url');
-    const seen = new Set<string>();
-    for (const match of endpointMatches) {
-      const method = match[1];
-      const url = match[2];
-      const key = `${method} ${url}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      lines.push(`e|${method}|${url}`);
-      if (seen.size >= 20) break;
     }
   }
 
@@ -1082,32 +1053,34 @@ async function pressKey(key: string): Promise<unknown> {
 function getText(selector?: string, elementRef?: string): unknown {
   const element = getElement(selector, elementRef);
   const resolvedRef = getOrCreateElementRef(element, selector);
-  return { text: element.textContent, selector: selector ?? resolvedRef, elementRef: resolvedRef };
+  const text = (element as HTMLElement).innerText || element.textContent || '';
+  const compact = compactText(text, 200);
+  return compact ? `${resolvedRef} "${compact.replace(/"/g, '\\"')}"` : resolvedRef;
 }
 
 function getAttribute(selector: string | undefined, elementRef: string | undefined, attribute: string): unknown {
   const element = getElement(selector, elementRef);
   const resolvedRef = getOrCreateElementRef(element, selector);
-  return { value: element.getAttribute(attribute), attribute, selector: selector ?? resolvedRef, elementRef: resolvedRef };
+  const value = element.getAttribute(attribute) ?? '';
+  return value ? `${resolvedRef} ${attribute}="${value.replace(/"/g, '\\"')}"` : `${resolvedRef} ${attribute}=(none)`;
 }
 
 function handleGetElementByMarker(selector?: string, elementRef?: string): unknown {
   const el = getElement(selector, elementRef);
   const resolvedRef = getOrCreateElementRef(el, selector);
-  const attrs: Record<string, string> = {};
-  for (const attr of el.getAttributeNames()) {
-    attrs[attr] = el.getAttribute(attr) || '';
+  const tag = el.tagName.toLowerCase();
+  let line = `${resolvedRef} ${tag}`;
+  if (el.id) line += `#${el.id}`;
+  const cls = safeClassName(el);
+  if (cls) {
+    const classes = cls.split(/\s+/).filter(c => c.length > 0).slice(0, 3);
+    if (classes.length) line += '.' + classes.join('.');
   }
-  return {
-    tag: el.tagName.toLowerCase(),
-    className: el.className,
-    classList: Array.from(el.classList),
-    attributes: attrs,
-    textContent: el.textContent?.trim().substring(0, 1000),
-    innerHTML: el.innerHTML.substring(0, 1000),
-    rect: el.getBoundingClientRect(),
-    elementRef: resolvedRef,
-  };
+  const text = getElementTextSnippet(el, 80);
+  if (text) line += ` "${text.replace(/"/g, '\\"')}"`;
+  const rect = el.getBoundingClientRect();
+  line += ` [${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}]`;
+  return line;
 }
 
 function handleGetComponentOrigin(selector?: string, elementRef?: string): unknown {

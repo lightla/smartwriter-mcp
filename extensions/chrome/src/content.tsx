@@ -742,32 +742,41 @@ function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10):
 
   function getAccessibleName(el: Element): string {
     const ariaLabel = el.getAttribute('aria-label');
-    if (ariaLabel) return ariaLabel;
+    if (ariaLabel) return compactText(ariaLabel, 120);
     const ariaLabelledBy = el.getAttribute('aria-labelledby');
     if (ariaLabelledBy) {
       const labelEl = document.getElementById(ariaLabelledBy);
-      if (labelEl) return labelEl.textContent?.trim() || '';
+      if (labelEl) return compactText(labelEl.textContent || '', 120);
     }
     const placeholder = el.getAttribute('placeholder');
-    if (placeholder) return placeholder;
+    if (placeholder) return compactText(placeholder, 120);
     const title = el.getAttribute('title');
-    if (title) return title;
+    if (title) return compactText(title, 120);
     if (['input', 'textarea', 'select'].includes(el.tagName.toLowerCase())) {
       const id = el.id;
       if (id) {
         const label = document.querySelector(`label[for="${id}"]`);
-        if (label) return label.textContent?.trim() || '';
+        if (label) return compactText(label.textContent || '', 120);
       }
       const parentLabel = el.closest('label');
-      if (parentLabel) return parentLabel.textContent?.trim() || '';
+      if (parentLabel) return compactText(parentLabel.textContent || '', 120);
     }
-    if (el.tagName.toLowerCase() === 'img') return el.getAttribute('alt') || '';
-    if (['a', 'button'].includes(el.tagName.toLowerCase())) return el.textContent?.trim() || '';
-    return el.textContent?.trim().substring(0, 200) || '';
+    if (el.tagName.toLowerCase() === 'img') return compactText(el.getAttribute('alt') || '', 120);
+    
+    // Prefer innerText for elements as it ignores hidden text (scripts, styles)
+    let text = (el as HTMLElement).innerText || el.textContent || '';
+    text = compactText(text, 120);
+
+    // Heuristic to filter out code-like content
+    if (text.includes('=function') || text.includes('var ') || (text.includes('{') && text.includes('}'))) {
+      if (text.length > 40) return '';
+    }
+
+    return text;
   }
 
   function getHeadingLevel(el: Element): number | undefined {
-    const match = el.tagName.toLowerCase().match(/^h(d)$/);
+    const match = el.tagName.toLowerCase().match(/^h(\d)$/);
     if (match) return parseInt(match[1], 10);
     const ariaLevel = el.getAttribute('aria-level');
     if (ariaLevel) return parseInt(ariaLevel, 10);
@@ -782,6 +791,9 @@ function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10):
   }
 
   function shouldInclude(el: Element): boolean {
+    const tag = el.tagName.toLowerCase();
+    if (['script', 'style', 'noscript', 'template', 'svg'].includes(tag)) return false;
+    
     const role = getRole(el);
     if (role === 'none' || role === 'presentation') return false;
     if (role) return true;
@@ -793,6 +805,10 @@ function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10):
   function serializeNode(el: Element, depth: number): string[] {
     if (depth > maxDepth) return [];
     if (!isVisible(el)) return [];
+    
+    const tag = el.tagName.toLowerCase();
+    if (['script', 'style', 'noscript', 'template', 'svg'].includes(tag)) return [];
+
     const role = getRole(el);
     const lines: string[] = [];
     if (shouldInclude(el)) {

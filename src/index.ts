@@ -561,9 +561,7 @@ function isScalarLike(value: unknown): value is string | number | boolean | bigi
 }
 
 const TEXT_KEYS = new Set([
-  'note', 'description', 'title', 'text', 'content', 'message', 'detail', 'reason',
-  'summary', 'comment', 'label', 'hint', 'analysisHint', 'value', 'url', 'trigger', 'selector',
-  'prompt', 'query', 'input', 'output', 'error',
+  'note', 'text'
 ]);
 
 function toScalar(value: unknown, key?: string): string {
@@ -586,7 +584,7 @@ function toScalar(value: unknown, key?: string): string {
       return value.replace(/^([a-z]+):?(\d+)$/i, '$1$2');
     }
 
-    // Quote if key is in TEXT_KEYS OR if it contains spaces/newlines/tabs
+    // Quote if key is note/text OR if it contains spaces/newlines/tabs
     if ((key && TEXT_KEYS.has(key)) || /[\s\n\t]/.test(value)) {
       return `"${value.replace(/"/g, '\\"')}"`;
     }

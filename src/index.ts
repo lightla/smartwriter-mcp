@@ -805,52 +805,54 @@ function flattenToKvPairs(
 }
 
 function toCompactPsv(value: unknown): string {
-  const rows: Array<[string, string]> = [];
-  const header: [string, string] = ['path', 'data'];
+  if (value === null || value === undefined) return '';
 
   if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      if (isScalarLike(item)) {
-        rows.push([`value[${index}]`, toScalar(item)]);
-        return;
-      }
-
-      const elementText =
-        item && typeof item === 'object' && !Array.isArray(item)
-          ? (item as any)?.element?.text
-          : undefined;
-
+    return value.map((item, index) => {
+      if (isScalarLike(item)) return toScalar(item);
       const pairs: Array<[string, string]> = [];
-      flattenToKvPairs(item, '', pairs, { elementText: typeof elementText === 'string' ? elementText : undefined });
-      const compact = pairs
+      flattenToKvPairs(item, '', pairs);
+      return pairs
         .filter(([k]) => k.length > 0)
         .map(([k, v]) => `${k}=${kvEscapeCell(v)}`)
         .join(';');
-      rows.push([`value[${index}]`, compact]);
-    });
-
-    return [header.join('|'), ...rows.map(([k, v]) => `${escapePsvCell(k)}|${escapePsvCell(v)}`)].join('\n');
+    }).join('\n');
   }
 
   if (isScalarLike(value)) {
-    return [header.join('|'), `value|${escapePsvCell(toScalar(value))}`].join('\n');
+    return toScalar(value);
   }
 
   const pairs: Array<[string, string]> = [];
   flattenToKvPairs(value, '', pairs);
-  const compact = pairs
+  return pairs
     .filter(([k]) => k.length > 0)
     .map(([k, v]) => `${k}=${kvEscapeCell(v)}`)
     .join(';');
-  return [header.join('|'), `value|${escapePsvCell(compact)}`].join('\n');
 }
 
 function toPsv(value: unknown): string {
   return toCompactPsv(value);
 }
 
-function textResponse(data: unknown) {
+function textResponse(data: unknown, toolName?: string) {
   if (typeof data === 'string') return { content: [{ type: 'text', text: data }] };
+
+  // ACTION REVOLUTION: Return simple "OK" for interaction tools to save tokens
+  const actionTools = [
+    'type', 'click', 'press_key', 'press_enter', 'fill', 'check', 'uncheck', 
+    'hover', 'select_option', 'tab_connect', 'tab_disconnect', 'navigate', 
+    'reload', 'go_back', 'go_forward', 'tab_focus_connected', 
+    'clear_all_anotations', 'flow_clear_all_anotations'
+  ];
+  
+  if (toolName && actionTools.includes(toolName)) {
+    // Treat any non-error response as success for action tools
+    const isError = (data as any)?.error || (data as any)?.isError || (data as any)?.success === false;
+    if (!isError) return { content: [{ type: 'text', text: 'OK' }] };
+  }
+
+  // Handle PSV conversion with minimal noise
   return { content: [{ type: 'text', text: toPsv(data) }] };
 }
 
@@ -1032,7 +1034,7 @@ async function main() {
             if (cacheKey && FINGERPRINT_CACHE.has(cacheKey)) {
               result.sourceFile = FINGERPRINT_CACHE.get(cacheKey);
               result.analysisHint = `Found via Lightning Cache`;
-              return textResponse(result);
+              return textResponse(result, name);
             }
 
             // Discovery Paths
@@ -1137,7 +1139,7 @@ async function main() {
         } catch (e) { /* ignore fallback errors */ }
       }
 
-      return textResponse(result);
+      return textResponse(result, name);
     } catch (error) {
       return errorResponse(error);
     }

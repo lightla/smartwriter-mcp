@@ -227,7 +227,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
       },
       required: ['selector'],
     },
@@ -238,7 +238,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
         text: { type: 'string' },
       },
       required: ['selector', 'text'],
@@ -250,7 +250,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
         value: { type: 'string' },
       },
       required: ['selector', 'value'],
@@ -262,7 +262,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
         options: { type: 'array', items: { type: 'string' }, description: 'List of option values to select; first value will be used' },
       },
       required: ['selector', 'options'],
@@ -274,7 +274,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
       },
       required: ['selector'],
     },
@@ -285,7 +285,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
       },
       required: ['selector'],
     },
@@ -318,13 +318,13 @@ const COMMAND_MAP: Record<string, string> = {
   },
   {
     name: 'evaluate',
-    description: 'Execute JavaScript in the connected tab and return result. Optionally pass marker like a:1 from get_compact_annotations or index to expose the resolved DOM node as `element` inside the script.',
+    description: 'Execute JavaScript in the connected tab and return result. Optionally pass marker like a1 or index to expose the resolved DOM node as `element` inside the script.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         script: { type: 'string', description: 'JavaScript code to execute' },
         args: { type: 'array', items: { type: 'string' }, description: 'Optional positional arguments available as arg0, arg1, ... inside the script' },
-        marker: { type: 'string', description: 'Optional annotation marker from get_compact_annotations, e.g. a:1' },
+        marker: { type: 'string', description: 'Optional annotation marker from get_compact_annotations, e.g. a1)' },
         index: { type: 'number', description: 'Optional annotation index from get_compact_annotations; resolved element is available as `element` inside the script' },
       },
       required: ['script'],
@@ -341,7 +341,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a:1 from get_compact_annotations to scope snapshot' },
+        selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a1 to scope snapshot' },
       },
     },
   },
@@ -351,7 +351,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a:1 from get_compact_annotations to scope snapshot' },
+        selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a1 to scope snapshot' },
       },
     },
   },
@@ -372,7 +372,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
       },
       required: ['selector'],
     },
@@ -406,7 +406,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_compact_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like a1' },
       },
       required: ['selector'],
     },
@@ -417,7 +417,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'CSS selector, or annotation marker like a:1 from get_summary_annotations' },
+        selector: { type: 'string', description: 'CSS selector, or annotation marker like e1 from get_summary_annotations' },
         attribute: { type: 'string' },
       },
       required: ['selector', 'attribute'],
@@ -429,7 +429,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'Target selector (CSS/XPath/coords/marker like a:1) from get_summary_annotations' },
+        selector: { type: 'string', description: 'Target selector (CSS/XPath/coords/marker like a1' },
       },
       required: ['selector'],
     },
@@ -440,7 +440,7 @@ const COMMAND_MAP: Record<string, string> = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        selector: { type: 'string', description: 'Target selector (CSS/XPath/coords/marker like a:1) from get_summary_annotations' },
+        selector: { type: 'string', description: 'Target selector (CSS/XPath/coords/marker like a1' },
         project_path: { type: 'string', description: 'Optional: Path to the source code directory if it is different from the current workspace.' },
       },
       required: ['selector'],
@@ -448,7 +448,7 @@ const COMMAND_MAP: Record<string, string> = {
   },
   {
     name: 'flow_get_tab_ids',
-    description: 'Get flow tab IDs sorted as t:1..t:n.',
+    description: 'Get flow tab IDs sorted as t1..tn.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
@@ -463,11 +463,11 @@ const COMMAND_MAP: Record<string, string> = {
   },
   {
     name: 'tab_connect',
-    description: 'Connect to a tab (by t:1 or internal ID) to start sending commands to it',
+    description: 'Connect to a tab (by t1 or internal ID) to start sending commands to it',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        tabId: { type: 'string', description: 'Flow ID like t:1 or a numeric Tab ID' },
+        tabId: { type: 'string', description: 'Flow ID like t1 or a numeric Tab ID' },
       },
       required: ['tabId'],
     },
@@ -529,7 +529,7 @@ const COMMAND_MAP: Record<string, string> = {
   },
   {
     name: 'flow_get_compact_annotations',
-    description: 'Get compact tracked annotations across flow tabs. Returns id|pageId|tabId|type|trigger|note plus pageId|url mapping, sorted by annotation id. tabId is a TabFlow marker like t:1 (not the raw Chrome tabId).',
+    description: 'Get compact tracked annotations across flow tabs. Returns id|pageId|tabId|type|trigger|note plus pageId|url mapping, sorted by annotation id. tabId is a TabFlow marker like t1 (not the raw Chrome tabId).',
     inputSchema: {
       type: 'object' as const,
       properties: {

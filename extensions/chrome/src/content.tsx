@@ -1,6 +1,6 @@
 import type { ContentMessage, ContentResponse } from './types';
 
-const ELEMENT_REF_PREFIX = 'el:';
+const ELEMENT_REF_PREFIX = 'e';
 const elementRefStore = new Map<string, Element>();
 const selectorToRefStore = new Map<string, string>();
 let nextElementRefId = 1;
@@ -187,9 +187,9 @@ function finalizeTmpTabDomSnapshotStorage(): void {
 }
 
 function detectTargetType(target: string): TargetType {
-  if (/^a:\d+$/.test(target)) return 'annotation';
-  if (target.startsWith(ELEMENT_REF_PREFIX)) return 'element_ref';
-  // Backward-compat for old recorded element refs using data-sw-id
+  if (/^a\d+$/.test(target)) return 'annotation';
+  if (/^e\d+$/.test(target)) return 'element_ref';
+  // Backward-compat for old recorded element refs
   if (/^el:[A-Za-z0-9_-]+$/.test(target)) return 'legacy_ref';
   if (/^\d+,\d+$/.test(target)) return 'coords';
   if (target.startsWith('//') || target.startsWith('/')) return 'xpath';
@@ -197,7 +197,9 @@ function detectTargetType(target: string): TargetType {
 }
 
 function resolveElementFromTarget(target: string, forceFresh = false): HTMLElement {
-  if (target.startsWith(ELEMENT_REF_PREFIX)) {
+  const targetType = detectTargetType(target);
+  
+  if (targetType === 'element_ref') {
     return getElementByRef(target) as HTMLElement;
   }
   if (!forceFresh) {
@@ -217,10 +219,9 @@ function resolveElementFromTarget(target: string, forceFresh = false): HTMLEleme
   }
 
   let el: Element | null = null;
-  const targetType = detectTargetType(target);
 
   if (targetType === 'annotation') {
-    const stepNum = parseInt(target.slice(2), 10);
+    const stepNum = parseInt(target.slice(1), 10);
     const cache = swTabFlowEnabled ? swAllAnnotationsCache : swAnnotationsCache;
     const ann = cache.find(a => a.stepNumber === stepNum);
     if (ann) {
@@ -578,7 +579,13 @@ async function evaluateScript(script: string, args: unknown[] = []): Promise<unk
 }
 
 function compactText(input: string, maxLen: number): string {
-  return input.replace(/\s+/g, ' ').trim().slice(0, maxLen);
+  if (!input) return '';
+  // Remove zero-width spaces, non-breaking spaces, and normalize all whitespace
+  return input
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen);
 }
 
 function getElementTextSnippet(element: Element, maxLen = 80): string {
@@ -693,9 +700,8 @@ function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxN
 
 
 function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10): string {
+  resetTmpTabDomSnapshotStorage();
   const root = (selector || elementRef) ? getElement(selector, elementRef) : document.body;
-  let refCounter = 1;
-  const refMap = new Map<Element, string>();
 
   function getRole(el: Element): string | null {
     const explicitRole = el.getAttribute('role');
@@ -742,37 +748,46 @@ function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10):
 
   function getAccessibleName(el: Element): string {
     const ariaLabel = el.getAttribute('aria-label');
-    if (ariaLabel) return compactText(ariaLabel, 120);
+    if (ariaLabel) return compactText(ariaLabel, 80);
     const ariaLabelledBy = el.getAttribute('aria-labelledby');
     if (ariaLabelledBy) {
       const labelEl = document.getElementById(ariaLabelledBy);
-      if (labelEl) return compactText(labelEl.textContent || '', 120);
+      if (labelEl) return compactText(labelEl.textContent || '', 80);
     }
     const placeholder = el.getAttribute('placeholder');
-    if (placeholder) return compactText(placeholder, 120);
+    if (placeholder) return compactText(placeholder, 80);
     const title = el.getAttribute('title');
-    if (title) return compactText(title, 120);
-    if (['input', 'textarea', 'select'].includes(el.tagName.toLowerCase())) {
-      const id = el.id;
-      if (id) {
-        const label = document.querySelector(`label[for="${id}"]`);
-        if (label) return compactText(label.textContent || '', 120);
-      }
-      const parentLabel = el.closest('label');
-      if (parentLabel) return compactText(parentLabel.textContent || '', 120);
-    }
-    if (el.tagName.toLowerCase() === 'img') return compactText(el.getAttribute('alt') || '', 120);
+    if (title) return compactText(title, 80);
+
+    const tag = el.tagName.toLowerCase();
+    const role = getRole(el);
     
-    // Prefer innerText for elements as it ignores hidden text (scripts, styles)
-    let text = (el as HTMLElement).innerText || el.textContent || '';
-    text = compactText(text, 120);
+    // Interactive elements: buttons, links, etc.
+    const isInteractive = ['a', 'button', 'input', 'textarea', 'select', 'summary', 'menuitem', 'option'].includes(tag) || 
+                          ['button', 'link', 'checkbox', 'textbox', 'combobox', 'menuitem'].includes(role || '');
 
-    // Heuristic to filter out code-like content
-    if (text.includes('=function') || text.includes('var ') || (text.includes('{') && text.includes('}'))) {
-      if (text.length > 40) return '';
+    if (isInteractive) {
+      // For interactive elements, use direct text or title
+      return compactText((el as HTMLElement).innerText || el.textContent || '', 80);
     }
 
-    return text;
+    // Headings and list items
+    if (/^h\d$/.test(tag) || tag === 'li') {
+      return compactText((el as HTMLElement).innerText || el.textContent || '', 80);
+    }
+
+    // For generic containers: ONLY return text if it's a LEAF node (no element children)
+    if (el.childElementCount === 0) {
+      let text = (el as HTMLElement).innerText || el.textContent || '';
+      text = compactText(text, 80);
+      // Filter out code, keyboard modifiers, and very long junk
+      const junkPatterns = ['=function', 'window.', '()=>', '{', '}', 'ctrl', 'shift', 'alt', 'cmd', 'enter', 'tab', 'kiểm soát'];
+      if (junkPatterns.some(p => text.toLowerCase().includes(p))) return '';
+      
+      return text;
+    }
+
+    return '';
   }
 
   function getHeadingLevel(el: Element): number | undefined {
@@ -791,59 +806,97 @@ function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10):
   }
 
   function shouldInclude(el: Element): boolean {
+    if (el.getAttribute('aria-hidden') === 'true') return false;
     const tag = el.tagName.toLowerCase();
-    if (['script', 'style', 'noscript', 'template', 'svg'].includes(tag)) return false;
+    if (['script', 'style', 'noscript', 'template', 'svg', 'br', 'hr'].includes(tag)) return false;
     
     const role = getRole(el);
-    if (role === 'none' || role === 'presentation') return false;
-    if (role) return true;
-    const text = getAccessibleName(el);
-    if (text && !Array.from(el.children).some(c => getRole(c))) return true;
+    const name = getAccessibleName(el);
+
+    // Standalone keyboard modifiers or control hints are noise
+    const lowerName = name.toLowerCase();
+    if (['ctrl', 'shift', 'alt', 'cmd', 'kiểm soát', 'k'].includes(lowerName)) return false;
+    if (lowerName.length === 1 && /^[a-z0-9]$/.test(lowerName)) return false; // Filter single char hints like 'K'
+
+    // HIGH SIGNAL: Landmark roles, interactive roles, or explicit labels
+    const importantRoles = ['navigation', 'main', 'banner', 'contentinfo', 'search', 'form', 'dialog', 'alert', 'status', 'list', 'article', 'complementary'];
+    const interactiveRoles = ['button', 'link', 'checkbox', 'textbox', 'combobox', 'menuitem', 'heading', 'listitem'];
+
+    if (role && (importantRoles.includes(role) || interactiveRoles.includes(role))) return true;
+    if (el.getAttribute('aria-label') || el.getAttribute('title')) return true;
+
+    // LEAF TEXT: Include generic nodes ONLY if they have text and NO element children
+    if (name && el.childElementCount === 0) return true;
+    
     return false;
   }
 
-  function serializeNode(el: Element, depth: number): string[] {
+  function serializeNode(el: Element, depth: number, parentName?: string): string[] {
     if (depth > maxDepth) return [];
     if (!isVisible(el)) return [];
+    if (el.getAttribute('aria-hidden') === 'true') return [];
     
     const tag = el.tagName.toLowerCase();
     if (['script', 'style', 'noscript', 'template', 'svg'].includes(tag)) return [];
 
     const role = getRole(el);
+    const name = getAccessibleName(el);
     const lines: string[] = [];
+
     if (shouldInclude(el)) {
-      const name = getAccessibleName(el);
-      const ref = `e${refCounter++}`;
-      refMap.set(el, ref);
-      let line = '- ';
-      if (role) line += role;
-      if (name) line += ` "${name.replace(/"/g, '\\"')}"`;
+      // COLLAPSE IDENTICAL NESTED LANDMARKS: Skip if name is same as parent and role is not interactive
+      if (name && parentName && name === parentName) {
+        const interactiveRoles = ['button', 'link', 'checkbox', 'textbox', 'combobox', 'menuitem'];
+        if (!role || !interactiveRoles.includes(role)) {
+          // Process children but don't add this node
+          for (let i = 0; i < el.children.length; i++) {
+            const childLines = serializeNode(el.children[i], depth, parentName);
+            for (const cl of childLines) lines.push(cl);
+          }
+          return lines;
+        }
+      }
+
+      const ref = getOrCreateElementRef(el);
+      // NEW FORMAT: [ID] [Role] "Name"
+      let line = `${ref} `;
+      if (role && role !== 'generic') line += role + ' ';
+      if (name) line += `"${name.replace(/"/g, '\\"')}" `;
+      
       const level = getHeadingLevel(el);
-      if (level) line += ` [level=${level}]`;
-      const checked = el.getAttribute('aria-checked');
-      if (checked) line += ` [checked=${checked}]`;
-      const selected = el.getAttribute('aria-selected');
-      if (selected) line += ` [selected=${selected}]`;
+      if (level) line += `[level=${level}] `;
       const expanded = el.getAttribute('aria-expanded');
-      if (expanded !== null) line += ` [expanded=${expanded}]`;
+      if (expanded !== null) line += `[expanded=${expanded}] `;
       const disabled = el.getAttribute('disabled') || el.getAttribute('aria-disabled');
-      if (disabled === 'true') line += ' [disabled]';
-      line += ` [${ref}]`;
-      lines.push(line);
+      if (disabled === 'true') line += '[disabled] ';
+      
+      lines.push(line.trim());
+
+      // ATOMIC OPTIMIZATION: If this is an interactive element and has a name, 
+      // don't recurse into children (like keyboard shortcuts or icons).
+      const interactiveRoles = ['button', 'link', 'menuitem', 'option', 'checkbox', 'radio', 'heading'];
+      if (role && interactiveRoles.includes(role) && name) {
+        return lines;
+      }
+
       for (let i = 0; i < el.children.length; i++) {
-        const childLines = serializeNode(el.children[i], depth + 1);
+        const childLines = serializeNode(el.children[i], depth + 1, name || parentName);
         for (const cl of childLines) lines.push('  ' + cl);
       }
     } else {
+      // Skip this node but process children
       for (let i = 0; i < el.children.length; i++) {
-        const childLines = serializeNode(el.children[i], depth);
+        const childLines = serializeNode(el.children[i], depth, parentName);
         for (const cl of childLines) lines.push(cl);
       }
     }
     return lines;
   }
 
+
+
   const output = serializeNode(root, 0);
+  finalizeTmpTabDomSnapshotStorage();
   if (output.length === 0) return '- generic';
   return output.join('\n');
 }

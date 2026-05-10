@@ -840,12 +840,12 @@ async function pressKey(tabId: number, key: string): Promise<void> {
 
 function getFlowMarker(tabId: number): string | null {
   const idx = flowTabs.indexOf(tabId);
-  return idx !== -1 ? `t:${idx + 1}` : null;
+  return idx !== -1 ? `t${idx + 1}` : null;
 }
 
 function parseFlowMarker(value: string): number | null {
-  if (!value.startsWith('t:')) return null;
-  const idx = parseInt(value.slice(2), 10) - 1;
+  if (!value.startsWith('t')) return null;
+  const idx = parseInt(value.slice(1), 10) - 1;
   return (idx >= 0 && idx < flowTabs.length) ? flowTabs[idx] : null;
 }
 
@@ -944,7 +944,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
             .map((tabId, idx) => {
               const tab = tabs.find((t) => t.id === tabId);
               if (!tab) return null;
-              return `t:${idx + 1}|${(tab.title || '').replace(/\r?\n/g, ' ').trim()}`;
+              return `t${idx + 1}|${(tab.title || '').replace(/\r?\n/g, ' ').trim()}`;
             })
             .filter((row): row is string => row !== null);
           resolve(['tabId|tabTitle', ...rows].join('\n'));
@@ -1114,7 +1114,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
       const selector = args.tabId ? String(args.tabId) : '';
       let targetId = connectedTabId;
       if (selector) {
-        targetId = selector.startsWith('t:') ? parseFlowMarker(selector) : parseInt(selector, 10);
+        targetId = selector.startsWith('t') ? parseFlowMarker(selector) : parseInt(selector, 10);
       }
       if (targetId) {
         internalDisconnectTab(targetId);
@@ -1130,7 +1130,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
         if (connectedTabId) internalDisconnectTab(connectedTabId);
         return { success: true, connected: false };
       }
-      const targetId = selector.startsWith('t:') ? parseFlowMarker(selector) : parseInt(selector, 10);
+      const targetId = selector.startsWith('t') ? parseFlowMarker(selector) : parseInt(selector, 10);
       if (!targetId || isNaN(targetId)) throw new Error(`Invalid tab target: ${selector}`);
       
       // SERVER COMMAND logic: Connect if not already the active target

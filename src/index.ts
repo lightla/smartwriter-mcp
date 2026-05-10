@@ -567,9 +567,21 @@ const TEXT_KEYS = new Set([
 ]);
 
 function toScalar(value: unknown, key?: string): string {
-  if (value === null || value === undefined) return '';
+  if (value === null || value === undefined) {
+    if (key === 'trigger') return 'No';
+    return '';
+  }
+
   if (typeof value === 'string') {
-    // Standardize markers: a:1 -> a1, p:1 -> p1, etc.
+    // Special handling for trigger markers
+    if (key === 'trigger') {
+      const trimmed = value.trim();
+      if (!trimmed) return 'No';
+      // Return marker as-is (no quotes), e.g., a1
+      return trimmed.replace(/^([a-z]+):?(\d+)$/i, '$1$2');
+    }
+
+    // Standardize other markers: a:1 -> a1, p:1 -> p1, etc.
     if (key === 'id' || key === 'pageId' || key === 'tabId' || key === 'marker') {
       return value.replace(/^([a-z]+):?(\d+)$/i, '$1$2');
     }

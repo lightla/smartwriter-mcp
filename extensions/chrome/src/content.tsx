@@ -2286,10 +2286,10 @@ function swGetNextStep(callback: (n: number) => void): void {
 
 function swGetMarkerForAnnotation(ann: SwAnnotation, all: SwAnnotation[]): string | null {
   if (typeof ann.stepNumber === 'number' && Number.isInteger(ann.stepNumber) && ann.stepNumber > 0) {
-    return `a:${ann.stepNumber}`;
+    return `a${ann.stepNumber}`;
   }
   const idx = all.indexOf(ann);
-  if (idx >= 0) return `a:${idx + 1}`;
+  if (idx >= 0) return `a${idx + 1}`;
   return null;
 }
 

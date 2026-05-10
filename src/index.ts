@@ -560,9 +560,26 @@ function isScalarLike(value: unknown): value is string | number | boolean | bigi
   );
 }
 
-function toScalar(value: unknown): string {
+const TEXT_KEYS = new Set([
+  'note', 'description', 'title', 'text', 'content', 'message', 'detail', 'reason',
+  'summary', 'comment', 'label', 'hint', 'analysisHint', 'value', 'url', 'trigger', 'selector',
+  'prompt', 'query', 'input', 'output', 'error',
+]);
+
+function toScalar(value: unknown, key?: string): string {
   if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return `"${value}"`;
+  if (typeof value === 'string') {
+    // Standardize markers: a:1 -> a1, p:1 -> p1, etc.
+    if (key === 'id' || key === 'pageId' || key === 'tabId' || key === 'marker') {
+      return value.replace(/^([a-z]+):?(\d+)$/i, '$1$2');
+    }
+
+    // Quote if key is in TEXT_KEYS OR if it contains spaces/newlines/tabs
+    if ((key && TEXT_KEYS.has(key)) || /[\s\n\t]/.test(value)) {
+      return `"${value.replace(/"/g, '\\"')}"`;
+    }
+    return value;
+  }
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
   return Object.prototype.toString.call(value);
 }
@@ -588,7 +605,7 @@ function toCompactText(value: unknown, indent = 0): string {
       return value.map((v) => toScalar(v)).join(', ');
     }
 
-    // Array of flat objects with consistent keys => TABLE (header + rows)
+    // Array of flat objects with consistent keys => TABLE
     // e.g. [{id:a1,pageId:p1,...}, {id:a2,pageId:p2,...}]
     if (value.length > 0 && value.every((item) => item && typeof item === 'object' && !Array.isArray(item))) {
       const firstKeys = Object.keys(value[0] as Record<string, unknown>);
@@ -600,12 +617,16 @@ function toCompactText(value: unknown, indent = 0): string {
         }) &&
         value.every((item) => Object.values(item as Record<string, unknown>).every((v) => isScalarLike(v)))
       ) {
-        // Build header row
-        const header = firstKeys.join(' ');
+        // Show header if > 2 columns OR if 2 columns are NOT (name, description)
+        const isStandardList = firstKeys.length === 2 && firstKeys[0] === 'name' && firstKeys[1] === 'description';
+        const showHeader = firstKeys.length > 2 || !isStandardList;
+
         const rows = (value as Array<Record<string, unknown>>).map((item) =>
-          firstKeys.map((k) => toScalar(item[k])).join(' ')
+          firstKeys.map((k) => toScalar(item[k], k)).join(' ')
         );
-        return [header, ...rows].map((line) => `${prefix}${line}`).join('\n');
+        
+        const lines = showHeader ? [firstKeys.join(' '), ...rows] : rows;
+        return lines.map((line) => `${prefix}${line}`).join('\n');
       }
     }
 
@@ -624,17 +645,22 @@ function toCompactText(value: unknown, indent = 0): string {
     const entries = Object.entries(obj);
     if (entries.length === 0) return '';
 
-    // Flat scalar map => key value, one line
+    // If all entries are scalars, put them on a single line if short, else one per line
     if (entries.every(([, v]) => isScalarLike(v))) {
-      return entries.map(([k, v]) => `${prefix}${k} ${toScalar(v)}`).join('\n');
+      const line = entries.map(([k, v]) => `${k} ${toScalar(v, k)}`).join(' ');
+      if (line.length < 80) return `${prefix}${line}`;
+      return entries.map(([k, v]) => `${prefix}${k} ${toScalar(v, k)}`).join('\n');
     }
 
     // Nested object
     return entries
       .map(([k, v]) => {
-        if (isScalarLike(v)) return `${prefix}${k} ${toScalar(v)}`;
-        return `${prefix}${k}\n${toCompactText(v, indent + 1)}`;
+        if (isScalarLike(v)) return `${prefix}${k} ${toScalar(v, k)}`;
+        const content = toCompactText(v, indent + 1);
+        if (content.trim().length === 0) return '';
+        return `${prefix}${k}\n${content}`;
       })
+      .filter(Boolean)
       .join('\n');
   }
 
@@ -658,7 +684,7 @@ function textResponse(data: unknown, toolName?: string) {
     if (!isError) return { content: [{ type: 'text', text: 'OK' }] };
   }
 
-  // Handle PSV conversion with minimal noise
+  // Handle ultra-compact text conversion with minimal noise
   return { content: [{ type: 'text', text: toCompactText(data) }] };
 }
 

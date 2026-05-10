@@ -23,8 +23,8 @@ const tabSourceTabId = new Map<number, number>();
 
 let isLoaded = false;
 const loadPromise = loadConfig().then(() => { isLoaded = true; });
-const ANNOTATION_MARKER_PREFIX = 'a:';
-// Note: `el:<n>` is now used for element refs returned by snapshots.
+const ANNOTATION_MARKER_PREFIX = 'a';
+// Note: `e<n>` is now used for element refs returned by snapshots.
 // Do not treat it as an annotation marker.
 const SELECTOR_COMMANDS = new Set([
   'TYPE',
@@ -169,37 +169,38 @@ function sortIndexedAnnotations(rows: IndexedAnnotation[]): IndexedAnnotation[] 
   return [...rows].sort((a, b) => a.index - b.index);
 }
 
-function formatAnnotationSummaries(rows: IndexedAnnotation[]): string {
-  const lines = toAnnotationRows(rows).map(({ annotation, markerNumber }) => {
-    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    const trigger = (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim();
-    return `${getAnnotationMarker(markerNumber)}|${annotation.type}|${trigger}|${note}`;
-  });
-  return ['id|type|trigger|note', ...lines].join('\n');
+function formatAnnotationSummaries(rows: IndexedAnnotation[]): Array<{id: string, type: string, trigger: string, note: string}> {
+  return toAnnotationRows(rows).map(({ annotation, markerNumber }) => ({
+    id: getAnnotationMarker(markerNumber),
+    type: annotation.type,
+    trigger: (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim(),
+    note: annotation.note ?? '',
+  }));
 }
 
 function getUrlLabelMap(rows: AnnotationRow[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const row of rows) {
     if (!map.has(row.annotation.url)) {
-      map.set(row.annotation.url, `p:${map.size + 1}`);
+      map.set(row.annotation.url, `p${map.size + 1}`);
     }
   }
   return map;
 }
 
-function formatCompactAnnotationsForConnectedTab(rows: IndexedAnnotation[]): string {
+function formatCompactAnnotationsForConnectedTab(rows: IndexedAnnotation[]): Array<{id: string, pageId: string, type: string, trigger: string, note: string}> {
   const sortedRows = toAnnotationRows(rows);
   const urlLabels = getUrlLabelMap(sortedRows);
-  const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
-  return ['id|pageId|type|trigger|note', ...sortedRows.map(({ annotation, markerNumber }) => {
-    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    const trigger = (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim();
-    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${annotation.type}|${trigger}|${note}`;
-  }), 'pageId|url', ...urlLines].join('\n');
+  return sortedRows.map(({ annotation, markerNumber }) => ({
+    id: getAnnotationMarker(markerNumber),
+    pageId: urlLabels.get(annotation.url) ?? '',
+    type: annotation.type,
+    trigger: (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim(),
+    note: annotation.note ?? '',
+  }));
 }
 
-function formatCompactAnnotationsGlobal(rows: IndexedAnnotation[], tabs: chrome.tabs.Tab[]): string {
+function formatCompactAnnotationsGlobal(rows: IndexedAnnotation[], tabs: chrome.tabs.Tab[]): Array<{id: string, pageId: string, tabId: string, type: string, trigger: string, note: string}> {
   const flowRows = toAnnotationRows(rows).map(({ annotation, markerNumber, index }) => ({
     annotation,
     markerNumber,
@@ -214,29 +215,31 @@ function formatCompactAnnotationsGlobal(rows: IndexedAnnotation[], tabs: chrome.
     index: row.index,
     markerNumber: row.markerNumber,
   })));
-  const lines = sorted.map(({ annotation, markerNumber, flowId }) => {
-    const note = (annotation.note ?? '').replace(/\r?\n/g, '\\n');
-    const trigger = (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim();
-    return `${getAnnotationMarker(markerNumber)}|${urlLabels.get(annotation.url) ?? ''}|${flowId ?? ''}|${annotation.type}|${trigger}|${note}`;
-  });
-  const urlLines = [...urlLabels.entries()].map(([url, label]) => `${label}|${url}`);
-  return ['id|pageId|tabId|type|trigger|note', ...lines, 'pageId|url', ...urlLines].join('\n');
+
+  return sorted.map(({ annotation, markerNumber, flowId }) => ({
+    id: getAnnotationMarker(markerNumber),
+    pageId: urlLabels.get(annotation.url) ?? '',
+    tabId: flowId ?? '',
+    type: annotation.type,
+    trigger: (annotation.trigger ?? '').replace(/\r?\n/g, ' ').trim(),
+    note: annotation.note ?? '',
+  }));
 }
 
-function clearAnnotationsByUrl(urlFilter?: string): Promise<string> {
+function clearAnnotationsByUrl(urlFilter?: string): Promise<{ cleared: boolean; scope: string; count: number }> {
   return new Promise((resolve) => {
     chrome.storage.local.get('smartwriterAnnotations', (result) => {
       const annotations = (result.smartwriterAnnotations || []) as Annotation[];
       const kept = urlFilter ? annotations.filter((annotation) => annotation.url !== urlFilter) : [];
       const deletedCount = annotations.length - kept.length;
       chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
-        resolve(['cleared|scope|count', `true|${urlFilter ?? 'all'}|${deletedCount}`].join('\n'));
+        resolve({ cleared: true, scope: urlFilter ?? 'all', count: deletedCount });
       });
     });
   });
 }
 
-function clearAnnotationsByTabId(tabId: number, connectedUrl?: string): Promise<string> {
+function clearAnnotationsByTabId(tabId: number, connectedUrl?: string): Promise<{ cleared: boolean; scope: string; count: number }> {
   return new Promise((resolve) => {
     chrome.storage.local.get('smartwriterAnnotations', (result) => {
       const annotations = (result.smartwriterAnnotations || []) as Annotation[];
@@ -246,14 +249,14 @@ function clearAnnotationsByTabId(tabId: number, connectedUrl?: string): Promise<
       });
       const deletedCount = annotations.length - kept.length;
       chrome.storage.local.set({ smartwriterAnnotations: kept }, () => {
-        resolve(['cleared|scope|count', `true|tab:${tabId}|${deletedCount}`].join('\n'));
+        resolve({ cleared: true, scope: `tab:${tabId}`, count: deletedCount });
       });
     });
   });
 }
 
-function flowDisabledResult(): string {
-  return ['result|reason', 'Empty|Tabflow must be enabled'].join('\n');
+function flowDisabledResult(): { result: string; reason: string } {
+  return { result: 'Empty', reason: 'Tabflow must be enabled' };
 }
 
 function deleteAnnotationFromList(
@@ -944,10 +947,10 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
             .map((tabId, idx) => {
               const tab = tabs.find((t) => t.id === tabId);
               if (!tab) return null;
-              return `t${idx + 1}|${(tab.title || '').replace(/\r?\n/g, ' ').trim()}`;
+              return { tabId: `t${idx + 1}`, tabTitle: (tab.title || '').replace(/\r?\n/g, ' ').trim() };
             })
-            .filter((row): row is string => row !== null);
-          resolve(['tabId|tabTitle', ...rows].join('\n'));
+            .filter((row): row is { tabId: string; tabTitle: string } => row !== null);
+          resolve(rows);
         });
       });
 
@@ -957,8 +960,8 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
         chrome.tabs.get(connectedTabId!, (tab) => {
           const title = (tab?.title || '').replace(/\r?\n/g, ' ').trim();
           const url = tab?.url || '';
-          const active = tab?.active ? 'true' : 'false';
-          resolve(['tabId|title|url|active', `${connectedTabId}|${title}|${url}|${active}`].join('\n'));
+          const active = tab?.active ?? false;
+          resolve({ tabId: String(connectedTabId), title, url, active });
         });
       });
     case 'FIND_ELEMENT_BY_TEXT':
@@ -1105,7 +1108,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
           const annotations = (result.smartwriterAnnotations || []) as Annotation[];
           const deleted = deleteAnnotationFromList(annotations, args as { index?: number | string; id?: string });
           chrome.storage.local.set({ smartwriterAnnotations: deleted.kept }, () => {
-            resolve(['deleted', deleted.deleted ? 'true' : 'false'].join('\n'));
+            resolve({ deleted: deleted.deleted, index: deleted.index, id: deleted.id });
           });
         });
       });

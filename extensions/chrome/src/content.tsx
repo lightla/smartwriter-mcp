@@ -65,10 +65,19 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
         result = await evaluateScript(message.script, message.args);
         break;
       case 'FIND_ELEMENT_BY_TEXT':
-        result = handleFindElementByText(message.text, message.exact);
+        const matchesResult = handleFindElementByText(message.text, message.exact);
+        if (matchesResult.length > 0) {
+          const m = matchesResult[0];
+          result = `${m.elementRef} ${m.tag} "${m.text.replace(/"/g, '\\"')}"`;
+        } else {
+          throw new Error(`Element with text "${message.text}" not found (searched text and attributes)`);
+        }
         break;
       case 'SMART_SEARCH':
         result = await handleSmartSearch(message.query);
+        break;
+      case 'SMART_FOCUS':
+        result = await handleSmartFocus(message.target);
         break;
       case 'HOVER':
         result = await handleHover(message.selector, message.elementRef);
@@ -106,6 +115,25 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
           y: Math.round(r.top + r.height / 2) 
         };
         break;
+      case 'SET_CURSOR_STATE': {
+        const { x, y, pulse, show } = message as { x?: number, y?: number, pulse?: boolean, show?: boolean };
+        let dot = document.getElementById('__sw_cursor__');
+        if (!dot) {
+          dot = document.createElement('div');
+          dot.id = '__sw_cursor__';
+          (document.documentElement || document.body).appendChild(dot);
+        }
+        dot.innerHTML = '';
+        if (x !== undefined) dot.style.left = `${x}px`;
+        if (y !== undefined) dot.style.top = `${y}px`;
+        dot.classList.toggle('show', show !== false);
+        if (pulse) {
+          dot.classList.add('pulse');
+          setTimeout(() => dot?.classList.remove('pulse'), 300);
+        }
+        result = { success: true };
+        break;
+      }
       case 'GET_ATTRIBUTE':
         result = getAttribute(message.selector, message.elementRef, message.attribute);
         break;
@@ -323,16 +351,126 @@ async function handleSmartSearch(query: string): Promise<unknown> {
   };
 }
 
-function handleFindElementByText(text: string, exact = false): unknown {
+function getScrollParent(node: Element | null): Element | Window {
+  if (!node) return window;
+  if (node.scrollHeight > node.clientHeight) {
+    const style = window.getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflow + style.overflowY)) return node;
+  }
+  return getScrollParent(node.parentElement);
+}
+
+async function handleSmartFocus(targetText: string): Promise<unknown> {
+  const matches = handleFindElementByText(targetText, false);
+  if (matches.length === 0) {
+    throw new Error(`Could not find any element matching: "${targetText}"`);
+  }
+
+  // Pick the best match with priority: Header > Input > Button/Link > Smallest Container
+  let bestEl: Element | null = null;
+  
+  for (const m of matches) {
+    const el = elementRefStore.get(m.elementRef);
+    if (!el || !isElementVisible(el)) continue;
+
+    // IF INSIDE A HEADER: Prioritize the whole header
+    const header = el.closest('h1, h2, h3, h4, h5, h6');
+    if (header) {
+      bestEl = header;
+      break;
+    }
+
+    const tag = el.tagName.toUpperCase();
+    
+    // IF LABEL: find associated input
+    if (tag === 'LABEL' && (el as HTMLLabelElement).control) {
+      bestEl = (el as HTMLLabelElement).control!;
+      break;
+    }
+
+    // IF INTERACTIVE: Input, Button, Link
+    if (['A', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
+      bestEl = el;
+      break;
+    }
+
+    // Look for interactive parents (up to 3 levels)
+    let p = el.parentElement;
+    for (let i = 0; i < 3 && p; i++) {
+      if (['A', 'BUTTON'].includes(p.tagName.toUpperCase())) {
+        bestEl = p;
+        break;
+      }
+      p = p.parentElement;
+    }
+    if (bestEl) break;
+  }
+
+  // Fallback to the first match
+  if (!bestEl) bestEl = elementRefStore.get(matches[0].elementRef)!;
+
+  if (!bestEl) throw new Error(`Matches found for "${targetText}" but couldn't resolve elements.`);
+
+  // 3. ACTIONS: Prepare the element for the user/agent
+  const htmlEl = bestEl as HTMLElement;
+  const tag = bestEl.tagName.toUpperCase();
+
+  // A. BRUTE-FORCE SCROLL (Absolute calculation)
+  const rect = htmlEl.getBoundingClientRect();
+  const scrollParent = getScrollParent(bestEl);
+  
+  if (scrollParent === window) {
+    const targetY = Math.max(0, window.pageYOffset + rect.top - 250);
+    // Try multiple ways to ensure it moves
+    window.scrollTo(0, targetY);
+    document.documentElement.scrollTop = targetY;
+    document.body.scrollTop = targetY;
+  } else {
+    const parent = scrollParent as Element;
+    const parentRect = parent.getBoundingClientRect();
+    const targetY = Math.max(0, parent.scrollTop + (rect.top - parentRect.top) - 250);
+    parent.scrollTo(0, targetY);
+    parent.scrollTop = targetY;
+  }
+  
+  // B. Visual confirmation (Wait for scroll to settle)
+  setTimeout(() => {
+    const updatedRect = htmlEl.getBoundingClientRect();
+    chrome.runtime.sendMessage({ 
+      type: 'SET_CURSOR_STATE', 
+      x: Math.round(updatedRect.left + updatedRect.width / 2), 
+      y: Math.round(updatedRect.top + updatedRect.height / 2), 
+      show: true 
+    });
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'SET_CURSOR_STATE', show: false });
+    }, 2000);
+  }, 300); // 300ms is safer for instant scroll to settle
+
+  // C. Auto-focus for inputs
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
+    htmlEl.focus();
+  }
+
+  return {
+    success: true,
+    elementRef: getOrCreateElementRef(bestEl),
+    tagName: tag.toLowerCase(),
+    text: getElementTextSnippet(bestEl, 100)
+  };
+}
+
+function isNavigationElement(el: Element): boolean {
+  return !!el.closest('nav, aside, footer, .toc, .table-of-contents, [class*="sidebar"], [class*="menu"], [class*="nav"]');
+}
+
+function handleFindElementByText(text: string, exact = false): Array<{elementRef: string, tag: string, text: string}> {
   const target = text.toLowerCase().trim();
   
-  // Get all potential containers, including those that might have fragmented text
-  const all = document.querySelectorAll('a, button, h1, h2, h3, h4, h5, h6, span, p, label, li, td, th, img');
-  
+  const all = document.querySelectorAll('a, button, h1, h2, h3, h4, h5, h6, span, p, label, li, td, th, img, em, strong, div');
   const matches: Element[] = [];
   
   all.forEach(el => {
-    // innerText is key here because it flattens text from all children: <b>a<span>b</span></b> -> "ab"
     const elText = (el as HTMLElement).innerText?.toLowerCase() || '';
     const elTitle = el.getAttribute('title')?.toLowerCase() || '';
     const elAlt = el.getAttribute('alt')?.toLowerCase() || '';
@@ -344,27 +482,40 @@ function handleFindElementByText(text: string, exact = false): unknown {
       isMatch = elText.includes(target) || elTitle.includes(target) || elAlt.includes(target);
     }
     
-    if (isMatch) {
+    if (isMatch && isElementVisible(el)) {
       matches.push(el);
     }
   });
 
   if (matches.length > 0) {
-    const found = matches.sort((a, b) => {
+    // ULTRA SMART SORT: 
+    // 1. Prefer content elements over navigation/TOC/Sidebars
+    // 2. Prioritize "deepest" elements (fewest children)
+    // 3. Prioritize elements higher up on the page
+    const sorted = matches.sort((a, b) => {
+      const aNav = isNavigationElement(a);
+      const bNav = isNavigationElement(b);
+      if (aNav !== bNav) return aNav ? 1 : -1;
+
       const aLen = a.querySelectorAll('*').length;
       const bLen = b.querySelectorAll('*').length;
       if (aLen !== bLen) return aLen - bLen;
+
       const aRect = a.getBoundingClientRect();
       const bRect = b.getBoundingClientRect();
-      return (aRect.width * aRect.height) - (bRect.width * bRect.height);
-    })[0];
-    const ref = getOrCreateElementRef(found);
-    const tag = found.tagName.toLowerCase();
-    const text = getElementTextSnippet(found, 100);
-    return `${ref} ${tag} "${text.replace(/"/g, '\\"')}"`;
+      const aY = window.pageYOffset + aRect.top;
+      const bY = window.pageYOffset + bRect.top;
+      return aY - bY;
+    });
+
+    return sorted.map(found => ({
+      elementRef: getOrCreateElementRef(found),
+      tag: found.tagName.toLowerCase(),
+      text: getElementTextSnippet(found, 100)
+    }));
   }
   
-  throw new Error(`Element with text "${text}" not found (searched text and attributes)`);
+  return [];
 }
 
 function handleResolveTaggedElements(data: unknown): unknown {

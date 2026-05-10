@@ -715,68 +715,48 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
   const target = { tabId };
   await ensureDebuggerAttached(tabId);
   try {
-    // Get absolute coordinates from content script (which has access to elementRefStore)
+    // 1. Get coordinates
     const pos = (await sendContentCommand(tabId, 'GET_ELEMENT_COORDS', { selector, elementRef })) as { x: number; y: number };
     
-    // Draw/Move the red dot at those coordinates
-    await withCallback<DebuggerEvaluateResult>((cb) =>
-      chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
-        expression: `(() => {
-          const DOT_ID = '__sw_cursor__';
-          let dot = document.getElementById(DOT_ID);
-          if (!dot) {
-            dot = document.createElement('div');
-            dot.id = DOT_ID;
-            Object.assign(dot.style, {
-              position: 'fixed', width: '16px', height: '16px', borderRadius: '50%',
-              background: '#ff0000', border: '2px solid white',
-              boxShadow: '0 0 10px rgba(0,0,0,0.5)',
-              pointerEvents: 'none', zIndex: '2147483647',
-              transform: 'translate(-50%,-50%)',
-              transition: 'left 0.2s ease, top 0.2s ease',
-              display: 'block'
-            });
-            (document.documentElement || document.body).appendChild(dot);
-          }
-          dot.style.left = ${pos.x} + 'px';
-          dot.style.top = ${pos.y} + 'px';
-        })()`,
-        returnByValue: false,
-      }, cb)
-    );
+    // 2. Centralized UI: Show/Move cursor with icon via content script
+    await sendContentCommand(tabId, 'SET_CURSOR_STATE', { x: pos.x, y: pos.y, show: true });
 
-    // Wait for dot movement
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for movement animation
+    await delay(200);
 
     if (command === 'CLICK') {
-      // Pulse animation
-      await withCallback<DebuggerEvaluateResult>((cb) =>
-        chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
-          expression: `(() => {
-            const dot = document.getElementById('__sw_cursor__');
-            if (dot) {
-              dot.style.transform = 'translate(-50%,-50%) scale(2)';
-              dot.style.backgroundColor = '#ffff00';
-              setTimeout(() => {
-                dot.style.transform = 'translate(-50%,-50%) scale(1)';
-                dot.style.backgroundColor = '#ff0000';
-              }, 200);
-            }
-          })()`,
-          returnByValue: false,
-        }, cb)
-      );
+      // 3. Centralized UI: Pulse effect
+      await sendContentCommand(tabId, 'SET_CURSOR_STATE', { pulse: true });
       
+      // Wait for pulse to start
+      await delay(50);
+
+      // 4. Physical CDP Clicks - Temporarily hide dot so it doesn't block the click
+      await sendContentCommand(tabId, 'SET_CURSOR_STATE', { show: false });
+
       await withCallback<unknown>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );
+      
+      // Tiny delay for realistic click duration
+      await delay(60);
+
       await withCallback<unknown>((cb) =>
         chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: pos.x, y: pos.y, button: 'left', clickCount: 1 }, cb)
       );
+      
       return { clicked: true, x: pos.x, y: pos.y };
     }
+
+    // For HOVER, hide after a bit too
+    setTimeout(() => {
+      sendContentCommand(tabId, 'SET_CURSOR_STATE', { show: false }).catch(() => {});
+    }, 1000);
+
     return { hovered: true, x: pos.x, y: pos.y };
   } catch (e) {
+    // Ensure hidden on error
+    sendContentCommand(tabId, 'SET_CURSOR_STATE', { show: false }).catch(() => {});
     throw e;
   }
 }
@@ -967,6 +947,22 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
     case 'FIND_ELEMENT_BY_TEXT':
       if (!connectedTabId) throw new Error('No tab connected.');
       return sendContentCommand(connectedTabId, 'FIND_ELEMENT_BY_TEXT', args);
+
+    case 'SMART_FOCUS': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: targetText } = args as { target: string };
+      try {
+        const result = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: targetText })) as {
+          elementRef: string;
+          tagName: string;
+          text: string;
+        };
+        // Return format: e165 a "why custody..."
+        return `${result.elementRef} ${result.tagName} "${result.text.replace(/"/g, '\\"')}"`;
+      } catch (error) {
+        return 'Not found';
+      }
+    }
 
     case 'SMART_SEARCH': {
       if (!connectedTabId) throw new Error('No tab connected.');
@@ -1168,19 +1164,51 @@ ${finalScript}`;
       return evaluateWithDebugger(connectedTabId, finalScript, scriptArgs || (args as any).args);
     }
 
-    case 'HOVER':
     case 'CLICK': {
       if (!connectedTabId) throw new Error('No tab connected.');
       const selector = String(args.selector ?? '');
-      try {
-        const resolved = await resolveSelectorArgument(connectedTabId, selector);
-        // Use real physical mouse action via CDP, supporting elementRef directly
-        const result = await mouseAction(connectedTabId, command as 'HOVER' | 'CLICK', resolved.selector, (args as any).elementRef);
-        return scrubSelectorResult(result, resolved);
-      } catch (error) {
-        const resolved = await resolveSelectorArgument(connectedTabId, selector);
-        throw sanitizeSelectorError(error, resolved);
+      const resolved = await resolveSelectorArgument(connectedTabId, selector);
+      
+      // 1. Capture initial state
+      const initialTab = await getTab(connectedTabId);
+      const initialUrl = initialTab?.url || '';
+      const initialState = (await evaluateWithDebugger(connectedTabId, 
+        "window.scrollY + '-' + document.body.innerText.length"
+      )) as string;
+
+      // 2. Strategy A: Physical CDP Click
+      await mouseAction(connectedTabId, 'CLICK', resolved.selector, (args as any).elementRef);
+      
+      // 3. Verification & Strategy B: Auto Fallback
+      await delay(600); // Wait for potential reaction
+      const currentTab = await getTab(connectedTabId);
+      const currentState = (await evaluateWithDebugger(connectedTabId, 
+        "window.scrollY + '-' + document.body.innerText.length"
+      )) as string;
+
+      const changed = (currentTab?.url !== initialUrl) || (currentState !== initialState);
+      
+      if (!changed) {
+        // Physical click didn't do anything visible -> Try JS Click (Self-Healing)
+        await evaluateWithDebugger(connectedTabId, `(() => {
+          const el = document.querySelector('[data-sw-ref="${resolved.elementRef}"]') || 
+                     document.querySelector(${JSON.stringify(resolved.selector)});
+          if (el && typeof el.click === 'function') {
+            el.click();
+          }
+        })()`);
+        return { success: true, method: 'js_fallback' };
       }
+
+      return { success: true, method: 'physical_click' };
+    }
+
+    case 'HOVER': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const selector = String(args.selector ?? '');
+      const resolved = await resolveSelectorArgument(connectedTabId, selector);
+      const result = await mouseAction(connectedTabId, 'HOVER', resolved.selector, (args as any).elementRef);
+      return scrubSelectorResult(result, resolved);
     }
 
     case 'TYPE': {

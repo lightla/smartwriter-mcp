@@ -183,6 +183,7 @@ const COMMAND_MAP: Record<string, string> = {
   tab_get_connected_info: 'GET_CONNECTED_TAB_INFO',
   find_element_by_text: 'FIND_ELEMENT_BY_TEXT',
   smart_search: 'SMART_SEARCH',
+  smart_focus: 'SMART_FOCUS',
   press_enter: 'PRESS_ENTER',
   };
 
@@ -191,6 +192,17 @@ const COMMAND_MAP: Record<string, string> = {
     name: 'cli_list_tools',
     description: 'List all Smartwriter MCP tools and their descriptions',
     inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'smart_focus',
+    description: 'Intelligently find the best target (link, button, etc.) by text or selector and return its reference marker (eIndex) for use with click/hover tools.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the element to focus' },
+      },
+      required: ['target'],
+    },
   },
   {
     name: 'press_enter',
@@ -682,10 +694,11 @@ function textResponse(data: unknown, toolName?: string) {
 
   // ACTION REVOLUTION: Return simple "OK" for interaction tools to save tokens
   const actionTools = [
-    'type', 'click', 'press_key', 'press_enter', 'fill', 'check', 'uncheck', 
+    'type', 'press_key', 'press_enter', 'fill', 'check', 'uncheck', 
     'hover', 'select_option', 'tab_connect', 'tab_disconnect', 'navigate', 
     'reload', 'go_back', 'go_forward', 'tab_focus_connected', 
     'clear_all_anotations', 'flow_clear_all_anotations'
+    // smart_focus and click EXCLUDED
   ];
   
   if (toolName && actionTools.includes(toolName)) {

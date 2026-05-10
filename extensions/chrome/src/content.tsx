@@ -82,6 +82,9 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
       case 'GET_SNAPSHOT':
         result = getSnapshot(message.selector, message.elementRef);
         break;
+      case 'GET_ARIA_SNAPSHOT':
+        result = getAriaSnapshot(message.selector, message.elementRef, message.depth);
+        break;
       case 'SCREENSHOT':
         result = await takeScreenshot();
         break;
@@ -686,6 +689,147 @@ function getCompactDomTreePsv(root: Element, options?: { maxDepth?: number; maxN
 
   finalizeTmpTabDomSnapshotStorage();
   return lines.join('\n');
+}
+
+
+function getAriaSnapshot(selector?: string, elementRef?: string, maxDepth = 10): string {
+  const root = (selector || elementRef) ? getElement(selector, elementRef) : document.body;
+  let refCounter = 1;
+  const refMap = new Map<Element, string>();
+
+  function getRole(el: Element): string | null {
+    const explicitRole = el.getAttribute('role');
+    if (explicitRole) return explicitRole;
+    const tag = el.tagName.toLowerCase();
+    switch (tag) {
+      case 'a': return el.hasAttribute('href') ? 'link' : null;
+      case 'button': return 'button';
+      case 'input': {
+        const type = (el as HTMLInputElement).type;
+        switch (type) {
+          case 'text': case 'email': case 'tel': case 'url': case 'search': case 'password': return 'textbox';
+          case 'checkbox': return 'checkbox';
+          case 'radio': return 'radio';
+          case 'number': return 'spinbutton';
+          case 'range': return 'slider';
+          case 'submit': case 'reset': case 'button': return 'button';
+          default: return 'textbox';
+        }
+      }
+      case 'textarea': return 'textbox';
+      case 'select': return 'combobox';
+      case 'img': return el.hasAttribute('alt') ? 'img' : null;
+      case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': return 'heading';
+      case 'nav': return 'navigation';
+      case 'main': return 'main';
+      case 'article': return 'article';
+      case 'aside': return 'complementary';
+      case 'dialog': return 'dialog';
+      case 'form': return 'form';
+      case 'search': return 'search';
+      case 'table': return 'table';
+      case 'ul': case 'ol': return 'list';
+      case 'li': return 'listitem';
+      case 'figure': return 'figure';
+      case 'footer': return 'contentinfo';
+      case 'header': return 'banner';
+      case 'progress': return 'progressbar';
+      case 'meter': return 'meter';
+      case 'summary': return 'button';
+      default: return null;
+    }
+  }
+
+  function getAccessibleName(el: Element): string {
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel) return ariaLabel;
+    const ariaLabelledBy = el.getAttribute('aria-labelledby');
+    if (ariaLabelledBy) {
+      const labelEl = document.getElementById(ariaLabelledBy);
+      if (labelEl) return labelEl.textContent?.trim() || '';
+    }
+    const placeholder = el.getAttribute('placeholder');
+    if (placeholder) return placeholder;
+    const title = el.getAttribute('title');
+    if (title) return title;
+    if (['input', 'textarea', 'select'].includes(el.tagName.toLowerCase())) {
+      const id = el.id;
+      if (id) {
+        const label = document.querySelector(`label[for="${id}"]`);
+        if (label) return label.textContent?.trim() || '';
+      }
+      const parentLabel = el.closest('label');
+      if (parentLabel) return parentLabel.textContent?.trim() || '';
+    }
+    if (el.tagName.toLowerCase() === 'img') return el.getAttribute('alt') || '';
+    if (['a', 'button'].includes(el.tagName.toLowerCase())) return el.textContent?.trim() || '';
+    return el.textContent?.trim().substring(0, 200) || '';
+  }
+
+  function getHeadingLevel(el: Element): number | undefined {
+    const match = el.tagName.toLowerCase().match(/^h(d)$/);
+    if (match) return parseInt(match[1], 10);
+    const ariaLevel = el.getAttribute('aria-level');
+    if (ariaLevel) return parseInt(ariaLevel, 10);
+    return undefined;
+  }
+
+  function isVisible(el: Element): boolean {
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function shouldInclude(el: Element): boolean {
+    const role = getRole(el);
+    if (role === 'none' || role === 'presentation') return false;
+    if (role) return true;
+    const text = getAccessibleName(el);
+    if (text && !Array.from(el.children).some(c => getRole(c))) return true;
+    return false;
+  }
+
+  function serializeNode(el: Element, depth: number): string[] {
+    if (depth > maxDepth) return [];
+    if (!isVisible(el)) return [];
+    const role = getRole(el);
+    const lines: string[] = [];
+    if (shouldInclude(el)) {
+      const name = getAccessibleName(el);
+      const ref = `e${refCounter++}`;
+      refMap.set(el, ref);
+      let line = '- ';
+      if (role) line += role;
+      if (name) line += ` "${name.replace(/"/g, '\\"')}"`;
+      const level = getHeadingLevel(el);
+      if (level) line += ` [level=${level}]`;
+      const checked = el.getAttribute('aria-checked');
+      if (checked) line += ` [checked=${checked}]`;
+      const selected = el.getAttribute('aria-selected');
+      if (selected) line += ` [selected=${selected}]`;
+      const expanded = el.getAttribute('aria-expanded');
+      if (expanded !== null) line += ` [expanded=${expanded}]`;
+      const disabled = el.getAttribute('disabled') || el.getAttribute('aria-disabled');
+      if (disabled === 'true') line += ' [disabled]';
+      line += ` [${ref}]`;
+      lines.push(line);
+      for (let i = 0; i < el.children.length; i++) {
+        const childLines = serializeNode(el.children[i], depth + 1);
+        for (const cl of childLines) lines.push('  ' + cl);
+      }
+    } else {
+      for (let i = 0; i < el.children.length; i++) {
+        const childLines = serializeNode(el.children[i], depth);
+        for (const cl of childLines) lines.push(cl);
+      }
+    }
+    return lines;
+  }
+
+  const output = serializeNode(root, 0);
+  if (output.length === 0) return '- generic';
+  return output.join('\n');
 }
 
 function getSnapshot(selector?: string, elementRef?: string): string {

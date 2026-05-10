@@ -13,6 +13,7 @@ export type ContentMessage =
   | { type: 'CHECK'; selector?: string; elementRef?: string }
   | { type: 'UNCHECK'; selector?: string; elementRef?: string }
   | { type: 'GET_SNAPSHOT'; selector?: string; elementRef?: string }
+  | { type: 'GET_ARIA_SNAPSHOT'; selector?: string; elementRef?: string; depth?: number }
   | { type: 'SCREENSHOT' }
   | { type: 'WAIT_FOR'; text: string; timeout?: number }
   | { type: 'PRESS_KEY'; key: string }

@@ -161,6 +161,7 @@ const COMMAND_MAP: Record<string, string> = {
   screenshot: 'SCREENSHOT',
   get_snapshot: 'GET_SNAPSHOT',
   get_compact_dom_snapshot: 'GET_SNAPSHOT',
+  get_aria_snapshot: 'GET_ARIA_SNAPSHOT',
   hover: 'HOVER',
   press_key: 'PRESS_KEY',
   wait_for: 'WAIT_FOR',
@@ -351,6 +352,17 @@ const COMMAND_MAP: Record<string, string> = {
       type: 'object' as const,
       properties: {
         selector: { type: 'string', description: 'Optional CSS selector or annotation marker like a:1 from get_compact_annotations to scope snapshot' },
+      },
+    },
+  },
+  {
+    name: 'get_aria_snapshot',
+    description: 'Get ARIA accessibility tree snapshot of the current page (ultra token-efficient, semantic roles)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        selector: { type: 'string', description: 'Optional CSS selector or annotation marker to scope snapshot' },
+        depth: { type: 'number', description: 'Maximum tree depth (default 10)' },
       },
     },
   },

@@ -1,0 +1,62 @@
+- generic [ref=e2]:
+  - navigation [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "Gmail" [ref=e8] [cursor=pointer]:
+          - /url: https://mail.google.com/mail/&ogbl
+        - link "Tìm kiếm hình ảnh" [ref=e10] [cursor=pointer]:
+          - /url: https://www.google.com/imghp?hl=vi&ogbl
+          - text: Hình ảnh
+      - button "Các ứng dụng của Google" [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+      - link "Đăng nhập" [ref=e18] [cursor=pointer]:
+        - /url: https://accounts.google.com/ServiceLogin?hl=vi&passive=true&continue=https://www.google.com/&ec=futura_exp_og_so_72776762_e
+  - generic [ref=e20]:
+    - link "Ngày của Mẹ năm 2026" [ref=e21] [cursor=pointer]:
+      - /url: /search?sca_esv=7cae0ba7a4b07b45&q=Ng%C3%A0y+c%E1%BB%A7a+m%E1%BA%B9&oi=ddle&noiga=1&ct=455632769&hl=vi&si=AL3DRZHmwLjWhgnaPB3UTu10R6S5qNLXiQiKMeezfKyB1FMsRg2eg5t7Q2KAyJU3V5CxFdzTrZ7Fj4IJOkNa-s9Yb3dSQL8AvMYheVqtqIalrQOAU3j8A9GUJP7cVvMUblJTdcsObZ4Wi2lDPYyPtK2_E-f5k-qNYyRPVj9ZdYFUR3EM9VSaVCQ%3D&sa=X&ved=0ahUKEwiKs5bWr66UAxUa2TQHHV7ZEvsQPQgC
+      - img "Ngày của Mẹ năm 2026" [ref=e23]
+    - button "Chia sẻ" [ref=e25]:
+      - generic "Chia sẻ" [ref=e26] [cursor=pointer]:
+        - img [ref=e30]
+  - search [ref=e33]:
+    - generic [ref=e35]:
+      - generic [ref=e37]:
+        - img [ref=e41]
+        - combobox "Tìm kiếm" [active] [ref=e44]
+        - generic [ref=e46]:
+          - button "Công cụ nhập" [ref=e47] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Tìm kiếm bằng giọng nói" [ref=e51] [cursor=pointer]:
+            - img [ref=e52]
+          - button "Tìm kiếm bằng hình ảnh" [ref=e54] [cursor=pointer]:
+            - img [ref=e55]
+      - generic [ref=e58]:
+        - button "Tìm trên Google" [ref=e59] [cursor=pointer]
+        - button "Xem trang đầu tiên tìm được" [ref=e60] [cursor=pointer]
+  - generic [ref=e63]:
+    - text: "Google hỗ trợ các ngôn ngữ:"
+    - link "English" [ref=e64] [cursor=pointer]:
+      - /url: https://www.google.com/setprefs?sig=0_LFNam6TOvTyFKtxKEB0Nim_-IWc%3D&hl=en&source=homepage&sa=X&ved=0ahUKEwiKs5bWr66UAxUa2TQHHV7ZEvsQ2ZgBCCc
+    - link "Français" [ref=e65] [cursor=pointer]:
+      - /url: https://www.google.com/setprefs?sig=0_LFNam6TOvTyFKtxKEB0Nim_-IWc%3D&hl=fr&source=homepage&sa=X&ved=0ahUKEwiKs5bWr66UAxUa2TQHHV7ZEvsQ2ZgBCCg
+    - link "繁體中文" [ref=e66] [cursor=pointer]:
+      - /url: https://www.google.com/setprefs?sig=0_LFNam6TOvTyFKtxKEB0Nim_-IWc%3D&hl=zh-TW&source=homepage&sa=X&ved=0ahUKEwiKs5bWr66UAxUa2TQHHV7ZEvsQ2ZgBCCk
+  - contentinfo [ref=e68]:
+    - generic [ref=e69]: Việt Nam
+    - generic [ref=e70]:
+      - generic [ref=e71]:
+        - link "Giới thiệu" [ref=e72] [cursor=pointer]:
+          - /url: https://about.google/?utm_source=google-VN&utm_medium=referral&utm_campaign=hp-footer&fg=1
+        - link "Quảng cáo" [ref=e73] [cursor=pointer]:
+          - /url: https://www.google.com/intl/vi_vn/ads/?subid=ww-ww-et-g-awa-a-g_hpafoot1_1!o2&utm_source=google.com&utm_medium=referral&utm_campaign=google_hpafooter&fg=1
+        - link "Doanh nghiệp" [ref=e74] [cursor=pointer]:
+          - /url: https://www.google.com/services/?subid=ww-ww-et-g-awa-a-g_hpbfoot1_1!o2&utm_source=google.com&utm_medium=referral&utm_campaign=google_hpbfooter&fg=1
+        - link "Cách hoạt động của Tìm kiếm" [ref=e75] [cursor=pointer]:
+          - /url: https://google.com/search/howsearchworks/?fg=1
+      - generic [ref=e76]:
+        - link "Quyền riêng tư" [ref=e77] [cursor=pointer]:
+          - /url: https://policies.google.com/privacy?hl=vi&fg=1
+        - link "Điều khoản" [ref=e78] [cursor=pointer]:
+          - /url: https://policies.google.com/terms?hl=vi&fg=1
+        - button "Cài đặt" [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: Cài đặt

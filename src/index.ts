@@ -1219,7 +1219,7 @@ async function main() {
 
     // API: Read a workflow YAML file
     if (req.method === 'GET' && urlPath.startsWith('/api/workflow-file')) {
-      const name = new URL(urlPath, 'http://localhost').searchParams.get('name');
+      const name = new URL(req.url || '/', 'http://localhost').searchParams.get('name');
       if (!name) { res.writeHead(400); res.end('Missing name parameter'); return; }
       // Search in project workflows/ dir first, then ~/.smartwriter/workflows/
       const projectWfDir = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'workflows');

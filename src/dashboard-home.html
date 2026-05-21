@@ -8,64 +8,103 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-.header { background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid #334155; padding: 20px 32px; display: flex; align-items: center; gap: 16px; }
+.header { background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid #334155; padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
 .header h1 { font-size: 22px; font-weight: 700; color: #38bdf8; }
 .header .subtitle { color: #94a3b8; font-size: 13px; }
 .nav-links { margin-left: auto; display: flex; gap: 12px; }
 .nav-links a { color: #94a3b8; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; transition: all 0.15s; }
 .nav-links a:hover { background: #1e293b; color: #e2e8f0; }
-.main { max-width: 1200px; margin: 0 auto; padding: 24px 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
-.card h2 { font-size: 16px; font-weight: 600; color: #38bdf8; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-.card h2 .icon { font-size: 18px; }
-.full-width { grid-column: 1 / -1; }
+
+/* Layout: left sidebar + right panel */
+.main { max-width: 1400px; margin: 0 auto; padding: 24px 32px; display: grid; grid-template-columns: 380px 1fr; gap: 24px; height: calc(100vh - 68px); }
+
+/* Cards */
+.card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+.card h2 { font-size: 15px; font-weight: 600; color: #38bdf8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.card h2 .icon { font-size: 16px; }
+
+/* Status */
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .status-dot.connected { background: #22c55e; }
 .status-dot.disconnected { background: #ef4444; }
-.tab-list { display: flex; flex-direction: column; gap: 8px; }
-.tab-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
-.tab-item.connected { border-color: #22c55e; }
+
+/* Left sidebar */
+.sidebar { display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+.sidebar .card { flex-shrink: 0; }
+.tab-list { display: flex; flex-direction: column; gap: 6px; max-height: 120px; overflow-y: auto; }
+.tab-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
 .tab-item .tab-info { flex: 1; min-width: 0; }
-.tab-item .tab-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-item .tab-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tab-item .tab-url { font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tab-item .tab-id { font-size: 11px; color: #475569; font-family: monospace; }
+
+/* Workflow list */
+.workflow-actions { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.workflow-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+.workflow-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; transition: border-color 0.15s; }
+.workflow-item.selected { border-color: #2563eb; background: rgba(37,99,235,0.08); }
+.workflow-item .wf-check { width: 16px; height: 16px; accent-color: #2563eb; cursor: pointer; flex-shrink: 0; }
+.workflow-item .wf-info { flex: 1; min-width: 0; }
+.workflow-item .wf-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workflow-item .wf-desc { font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workflow-item .wf-group { font-size: 10px; color: #475569; }
+
+/* Right panel - tabbed */
+.right-panel { display: flex; flex-direction: column; overflow: hidden; }
+.tab-bar { display: flex; background: #1e293b; border: 1px solid #334155; border-bottom: none; border-radius: 12px 12px 0 0; overflow: hidden; }
+.tab-btn { padding: 10px 20px; font-size: 13px; font-weight: 600; color: #94a3b8; background: transparent; border: none; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.tab-btn:hover { color: #e2e8f0; background: rgba(255,255,255,0.03); }
+.tab-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; background: rgba(56,189,248,0.05); }
+.tab-content { flex: 1; background: #1e293b; border: 1px solid #334155; border-top: none; border-radius: 0 0 12px 12px; overflow: hidden; }
+.tab-pane { display: none; height: 100%; overflow-y: auto; }
+.tab-pane.active { display: flex; flex-direction: column; }
+
+/* Log pane */
+.log-content { flex: 1; padding: 16px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.6; overflow-y: auto; }
+.log-entry { padding: 8px 0; border-bottom: 1px solid #1e293b; }
+.log-entry:last-child { border-bottom: none; }
+.log-entry-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.log-pass { color: #22c55e; }
+.log-fail { color: #ef4444; }
+.log-warn { color: #eab308; }
+.log-info { color: #94a3b8; }
+.log-step { padding-left: 16px; }
+.log-summary { margin-top: 12px; padding: 10px; background: #0f172a; border-radius: 8px; font-weight: 600; }
+.log-empty { color: #64748b; font-style: italic; padding: 40px; text-align: center; }
+.log-wf-name { font-weight: 600; color: #e2e8f0; }
+
+/* Editor pane */
+.editor-toolbar { display: flex; gap: 8px; padding: 8px 16px; align-items: center; border-bottom: 1px solid #334155; flex-shrink: 0; }
+.editor-toolbar .filename { font-size: 13px; color: #94a3b8; font-family: monospace; flex: 1; }
+.CodeMirror { height: calc(100% - 48px); border-radius: 0; }
+
+/* Buttons */
 .btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
 .btn-primary { background: #2563eb; color: white; }
 .btn-primary:hover { background: #1d4ed8; }
 .btn-secondary { background: #334155; color: #e2e8f0; }
 .btn-secondary:hover { background: #475569; }
+.sample-app-link { font-size: 12px; color: #38bdf8; text-decoration: none; padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; transition: all 0.15s; }
+.sample-app-link:hover { background: #1e293b; border-color: #38bdf8; }
 .btn-danger { background: #991b1b; color: #e2e8f0; }
 .btn-danger:hover { background: #b91c1c; }
 .btn-success { background: #059669; color: white; }
 .btn-success:hover { background: #047857; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.workflow-list { display: flex; flex-direction: column; gap: 8px; }
-.workflow-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
-.workflow-item.selected { border-color: #2563eb; background: #0f172a; }
-.workflow-item .wf-check { width: 18px; height: 18px; accent-color: #2563eb; cursor: pointer; }
-.run-all-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
-.run-all-bar .select-all-label { font-size: 13px; color: #94a3b8; cursor: pointer; display: flex; align-items: center; gap: 6px; }
-.run-all-output { margin-top: 12px; background: #0f172a; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; display: none; }
-.run-all-output.active { display: block; }
-.workflow-item .wf-info { flex: 1; min-width: 0; }
-.workflow-item .wf-name { font-size: 14px; font-weight: 500; }
-.workflow-item .wf-desc { font-size: 12px; color: #64748b; }
-.workflow-item .wf-group { font-size: 11px; color: #475569; }
-.editor-container { display: none; margin-top: 12px; }
-.editor-container.active { display: block; }
-.editor-toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
-.editor-toolbar .filename { font-size: 13px; color: #94a3b8; font-family: monospace; }
-.CodeMirror { height: 400px; border-radius: 8px; border: 1px solid #334155; }
+.btn-xs { padding: 3px 8px; font-size: 11px; border-radius: 4px; }
+
+/* Toast */
 .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; z-index: 9999; transition: opacity 0.3s; opacity: 0; }
 .toast.show { opacity: 1; }
 .toast.success { background: #059669; color: white; }
 .toast.error { background: #991b1b; color: white; }
 .toast.info { background: #2563eb; color: white; }
-.run-output { margin-top: 12px; background: #0f172a; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; display: none; }
-.run-output.active { display: block; }
-.run-output .pass { color: #22c55e; }
-.run-output .fail { color: #ef4444; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
 </style>
 </head>
 <body>
@@ -80,54 +119,66 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; c
 </div>
 
 <div class="main">
-  <!-- Connected Tab -->
-  <div class="card">
-    <h2><span class="icon">&#9654;</span> Connected Tab <span class="status-dot disconnected" id="status-dot"></span></h2>
-    <div id="connected-info" style="color:#64748b;font-size:13px;">Not connected</div>
-    <div style="margin-top:12px;display:flex;gap:8px;">
-      <button class="btn btn-primary" onclick="launchSampleApp()">Start Sample App</button>
-      <button class="btn btn-secondary" onclick="refreshTabs()">Refresh Tabs</button>
+  <!-- Left sidebar -->
+  <div class="sidebar">
+    <!-- Connected Tab -->
+    <div class="card">
+      <h2><span class="icon">&#9654;</span> Connected Tab <span class="status-dot disconnected" id="status-dot"></span></h2>
+      <div id="connected-info" style="color:#64748b;font-size:13px;">Not connected</div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-sm btn-primary" onclick="launchSampleApp()">Start Sample App</button>
+        <a href="/test/" target="_blank" class="sample-app-link" id="sample-app-link">Open Sample App</a>
+        <span style="flex:1;"></span>
+        <button class="btn btn-sm btn-secondary" onclick="refreshTabs()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Chrome Tabs -->
+    <div class="card">
+      <h2><span class="icon">&#128449;</span> Chrome Tabs</h2>
+      <div id="tab-list" class="tab-list">
+        <div style="color:#64748b;font-size:13px;">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Workflows -->
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+      <h2 style="margin-bottom:8px;"><span class="icon">&#9881;</span> Workflows</h2>
+      <div class="workflow-actions">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#94a3b8;cursor:pointer;"><input type="checkbox" id="select-all-wf" onchange="toggleSelectAll(this.checked)" style="accent-color:#2563eb;"> All</label>
+        <button class="btn btn-xs btn-primary" onclick="runSelectedWorkflows()" id="run-selected-btn" disabled>Run Selected</button>
+        <span style="flex:1;"></span>
+        <button class="btn btn-xs btn-secondary" onclick="refreshWorkflows()">Refresh</button>
+        <button class="btn btn-xs btn-success" onclick="newWorkflow()">New</button>
+        <label class="btn btn-xs btn-secondary" style="cursor:pointer;">Upload <input type="file" accept=".yaml,.yml" onchange="uploadWorkflow(event)" style="display:none;"></label>
+      </div>
+      <div id="workflow-list" class="workflow-list">
+        <div style="color:#64748b;font-size:13px;">Loading...</div>
+      </div>
     </div>
   </div>
 
-  <!-- Tab List -->
-  <div class="card">
-    <h2><span class="icon">&#128449;</span> Chrome Tabs</h2>
-    <div id="tab-list" class="tab-list">
-      <div style="color:#64748b;font-size:13px;">Loading...</div>
+  <!-- Right panel: tabbed Log + Editor -->
+  <div class="right-panel">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="log" onclick="switchTab('log')">&#9654; Log</button>
+      <button class="tab-btn" data-tab="editor" onclick="switchTab('editor')">&#9998; Editor</button>
     </div>
-  </div>
-
-  <!-- Workflow List -->
-  <div class="card">
-    <h2><span class="icon">&#9881;</span> Workflows</h2>
-    <div style="margin-bottom:10px;display:flex;gap:8px;">
-      <button class="btn btn-sm btn-secondary" onclick="refreshWorkflows()">Refresh</button>
-      <button class="btn btn-sm btn-success" onclick="newWorkflow()">New</button>
-      <label class="btn btn-sm btn-secondary" style="cursor:pointer;">Upload <input type="file" accept=".yaml,.yml" onchange="uploadWorkflow(event)" style="display:none;"></label>
+    <div class="tab-content">
+      <div class="tab-pane active" id="pane-log">
+        <div class="log-content" id="log-content">
+          <div class="log-empty">Run a workflow to see output here</div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-editor">
+        <div class="editor-toolbar">
+          <span class="filename" id="editor-filename">No file selected</span>
+          <button class="btn btn-xs btn-secondary" onclick="saveWorkflow()" id="save-btn" disabled>Save</button>
+          <button class="btn btn-xs btn-success" onclick="runCurrentWorkflow()" id="run-btn" disabled>Run</button>
+        </div>
+        <textarea id="yaml-editor"></textarea>
+      </div>
     </div>
-    <div class="run-all-bar">
-      <label class="select-all-label"><input type="checkbox" id="select-all-wf" onchange="toggleSelectAll(this.checked)"> Select All</label>
-      <button class="btn btn-sm btn-primary" onclick="runSelectedWorkflows()" id="run-selected-btn" disabled>Run Selected</button>
-    </div>
-    <div id="workflow-list" class="workflow-list">
-      <div style="color:#64748b;font-size:13px;">Loading...</div>
-    </div>
-    <div class="run-all-output" id="run-all-output"></div>
-  </div>
-
-  <!-- Workflow Editor -->
-  <div class="card">
-    <h2><span class="icon">&#9998;</span> YAML Editor</h2>
-    <div class="editor-toolbar">
-      <span class="filename" id="editor-filename">No file selected</span>
-      <button class="btn btn-sm btn-primary" onclick="saveWorkflow()" id="save-btn" disabled>Save</button>
-      <button class="btn btn-sm btn-success" onclick="runCurrentWorkflow()" id="run-btn" disabled>Run</button>
-    </div>
-    <div class="editor-container active">
-      <textarea id="yaml-editor"></textarea>
-    </div>
-    <div class="run-output" id="run-output"></div>
   </div>
 </div>
 
@@ -141,7 +192,17 @@ const API = '';
 let editor = null;
 let currentFile = null;
 let originalContent = '';
+let allWorkflows = [];
 
+// --- Tab switching ---
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById('pane-' + tab).classList.add('active');
+  if (tab === 'editor' && editor) editor.refresh();
+}
+
+// --- Toast ---
 function showToast(msg, type='info') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -149,18 +210,19 @@ function showToast(msg, type='info') {
   setTimeout(() => t.className = 'toast ' + type, 2500);
 }
 
+// --- API ---
 async function api(path, opts={}) {
   const res = await fetch(API + path, opts);
   return res.json();
 }
 
-// Tabs
+// --- Tabs ---
 async function refreshTabs() {
   try {
     const tabs = await api('/api/tabs');
     const list = document.getElementById('tab-list');
     if (!tabs || tabs.length === 0) {
-      list.innerHTML = '<div style="color:#64748b;font-size:13px;">No tabs found. Open some tabs in Chrome and connect the extension.</div>';
+      list.innerHTML = '<div style="color:#64748b;font-size:13px;">No tabs found</div>';
       return;
     }
     list.innerHTML = tabs.map(t => `
@@ -168,9 +230,8 @@ async function refreshTabs() {
         <div class="tab-info">
           <div class="tab-title">${escHtml(t.title||'Untitled')}</div>
           <div class="tab-url">${escHtml(t.url||'')}</div>
-          <div class="tab-id">tabId: ${t.tabId}</div>
         </div>
-        <button class="btn btn-sm btn-primary" onclick="connectTab(${t.tabId})">Connect</button>
+        <button class="btn btn-xs btn-primary" onclick="connectTab(${t.tabId})">Connect</button>
       </div>
     `).join('');
   } catch (e) {
@@ -207,28 +268,26 @@ async function launchSampleApp() {
   try {
     await api('/api/connect-tab', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
   } catch {}
-  // Navigate connected tab to sample app
   try {
     const ws = new WebSocket(`ws://localhost:${PORT}`);
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: 'COMMAND', command: 'NAVIGATE', requestId: 'nav-' + Date.now(), args: { url: `http://localhost:${PORT}/test/` } }));
+      ws.close();
     };
-    showToast('Navigating to sample app...', 'info');
+    showToast('Sample app loaded in connected tab', 'success');
   } catch (e) {
     showToast('Failed: ' + (e.message||e), 'error');
   }
 }
 
-let allWorkflows = [];
-
-// Workflows
+// --- Workflows ---
 async function refreshWorkflows() {
   try {
     const workflows = await api('/api/workflows');
     const list = document.getElementById('workflow-list');
     allWorkflows = workflows || [];
     if (!workflows || workflows.length === 0) {
-      list.innerHTML = '<div style="color:#64748b;font-size:13px;">No workflow files found. Create one or upload.</div>';
+      list.innerHTML = '<div style="color:#64748b;font-size:13px;">No workflows found</div>';
       document.getElementById('run-selected-btn').disabled = true;
       return;
     }
@@ -240,8 +299,8 @@ async function refreshWorkflows() {
           ${w.description ? '<div class="wf-desc">'+escHtml(w.description)+'</div>' : ''}
           ${w.group ? '<div class="wf-group">'+escHtml(w.group)+'</div>' : ''}
         </div>
-        <button class="btn btn-sm btn-secondary" onclick="editWorkflow('${escAttr(w.name)}')">Edit</button>
-        <button class="btn btn-sm btn-success" onclick="runWorkflow('${escAttr(w.name)}')">Run</button>
+        <button class="btn btn-xs btn-secondary" onclick="editWorkflow('${escAttr(w.name)}')" title="Edit">Edit</button>
+        <button class="btn btn-xs btn-success" onclick="runWorkflow('${escAttr(w.name)}')" title="Run">Run</button>
       </div>
     `).join('');
     onWfCheckChange();
@@ -259,61 +318,183 @@ function onWfCheckChange() {
   const checks = document.querySelectorAll('.wf-check');
   const checked = [...checks].filter(cb => cb.checked);
   document.getElementById('run-selected-btn').disabled = checked.length === 0;
-  document.getElementById('run-selected-btn').textContent = checked.length > 0 ? `Run Selected (${checked.length})` : 'Run Selected';
-  // Update select-all state
+  document.getElementById('run-selected-btn').textContent = checked.length > 0 ? `Run (${checked.length})` : 'Run Selected';
   const selectAll = document.getElementById('select-all-wf');
   if (selectAll) {
     selectAll.checked = checks.length > 0 && checked.length === checks.length;
     selectAll.indeterminate = checked.length > 0 && checked.length < checks.length;
   }
-  // Highlight selected items
   document.querySelectorAll('.workflow-item[data-wf-name]').forEach(item => {
     const cb = item.querySelector('.wf-check');
     item.classList.toggle('selected', cb && cb.checked);
   });
 }
 
+// --- Log output ---
+function clearLog() {
+  const el = document.getElementById('log-content');
+  el.innerHTML = '<div class="log-empty">Run a workflow to see output here</div>';
+}
+
+function appendLogEntry(name, result, error) {
+  const el = document.getElementById('log-content');
+  // Remove empty state
+  const empty = el.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+
+  if (error) {
+    entry.innerHTML = `<div class="log-entry-header"><span class="log-fail">✗</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-fail">FAILED</span></div>
+      <div class="log-step log-fail">${escHtml(error)}</div>`;
+  } else {
+    const r = result;
+    const statusIcon = r.failed > 0 ? '<span class="log-fail">✗</span>' : '<span class="log-pass">✓</span>';
+    const statusText = r.failed > 0 ? `<span class="log-fail">${r.failed} failed</span>` : '<span class="log-pass">all passed</span>';
+    const duration = (r.steps||[]).reduce((s,st) => s + (st.duration||0), 0);
+    let html = `<div class="log-entry-header">${statusIcon} <span class="log-wf-name">${escHtml(r.name||name)}</span> ${statusText} · ${r.passed}/${r.total} · ${duration}ms</div>`;
+    for (const step of (r.steps||[])) {
+      const cls = step.status === 'passed' ? 'log-pass' : 'log-fail';
+      const icon = step.status === 'passed' ? '✓' : '✗';
+      html += `<div class="log-step"><span class="${cls}">${icon}</span> Step ${step.step}: ${escHtml(step.tool)}`;
+      if (step.error) html += ` <span class="log-fail">(${escHtml(step.error)})</span>`;
+      // Show expect results
+      if (step.expectResults && step.expectResults.length) {
+        for (const er of step.expectResults) {
+          const ecls = er.passed ? 'log-pass' : 'log-fail';
+          const eicon = er.passed ? '✓' : '✗';
+          html += `<div class="log-step"><span class="${ecls}">${eicon}</span> ${escHtml(er.condition||er.detail||'')}`;
+          if (!er.passed && er.detail) html += ` — ${escHtml(er.detail)}`;
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+    entry.innerHTML = html;
+  }
+  el.appendChild(entry);
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendLogSummary(totalPassed, totalFailed, wfCount) {
+  const el = document.getElementById('log-content');
+  const div = document.createElement('div');
+  div.className = 'log-summary';
+  const icon = totalFailed > 0 ? '<span class="log-fail">✗</span>' : '<span class="log-pass">✓</span>';
+  div.innerHTML = `${icon} Done: ${wfCount} workflow${wfCount>1?'s':''}, ${totalPassed} passed, ${totalFailed} failed · <a href="/results" target="_blank" style="color:#38bdf8;">View Results</a>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// --- Run ---
+async function runWorkflow(name) {
+  switchTab('log');
+  const el = document.getElementById('log-content');
+  const empty = el.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  // Show running indicator
+  const running = document.createElement('div');
+  running.className = 'log-entry';
+  running.innerHTML = `<div class="log-entry-header"><span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">running...</span></div>`;
+  el.appendChild(running);
+  el.scrollTop = el.scrollHeight;
+
+  try {
+    const result = await api('/api/run-workflow', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, sessionId: 'dash-' + Date.now() })
+    });
+    running.remove();
+    if (result.result) {
+      appendLogEntry(name, result.result, null);
+    } else {
+      appendLogEntry(name, null, result.error || 'Unknown error');
+    }
+    showToast('Completed: ' + name, 'success');
+    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
+  } catch (e) {
+    running.remove();
+    appendLogEntry(name, null, e.message || String(e));
+    showToast('Failed: ' + name, 'error');
+  }
+}
+
+async function runCurrentWorkflow() {
+  if (!currentFile) return;
+  switchTab('log');
+  const yamlContent = editor.getValue();
+  const name = currentFile;
+  const el = document.getElementById('log-content');
+  const empty = el.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  const running = document.createElement('div');
+  running.className = 'log-entry';
+  running.innerHTML = `<div class="log-entry-header"><span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">running (editor)...</span></div>`;
+  el.appendChild(running);
+  el.scrollTop = el.scrollHeight;
+
+  try {
+    const result = await api('/api/run-workflow', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ yaml: yamlContent, sessionId: 'dash-' + Date.now() })
+    });
+    running.remove();
+    if (result.result) {
+      appendLogEntry(name, result.result, null);
+    } else {
+      appendLogEntry(name, null, result.error || 'Unknown error');
+    }
+    showToast('Completed: ' + name, 'success');
+    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
+  } catch (e) {
+    running.remove();
+    appendLogEntry(name, null, e.message || String(e));
+    showToast('Failed: ' + name, 'error');
+  }
+}
+
 async function runSelectedWorkflows() {
   const checked = [...document.querySelectorAll('.wf-check:checked')];
   if (checked.length === 0) return;
-  const output = document.getElementById('run-all-output');
-  output.className = 'run-all-output active';
-  output.innerHTML = '';
+  switchTab('log');
   const btn = document.getElementById('run-selected-btn');
   btn.disabled = true;
   btn.textContent = 'Running...';
   let totalPassed = 0, totalFailed = 0;
   for (const cb of checked) {
     const name = cb.dataset.wfName;
-    output.innerHTML += `<div style="color:#94a3b8;border-top:1px solid #334155;padding-top:8px;margin-top:8px;">▶ Running: ${escHtml(name)}</div>`;
     try {
       const result = await api('/api/run-workflow', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ name, sessionId: 'dash-' + Date.now() })
       });
-      const r = result.result;
-      if (r) {
-        totalPassed += r.passed || 0;
-        totalFailed += r.failed || 0;
-        const statusIcon = r.failed > 0 ? '<span class="fail">✗ FAIL</span>' : '<span class="pass">✓ PASS</span>';
-        output.innerHTML += `<div>${statusIcon} ${escHtml(r.name)}: ${r.passed} passed, ${r.failed} failed</div>`;
+      if (result.result) {
+        totalPassed += result.result.passed || 0;
+        totalFailed += result.result.failed || 0;
+        appendLogEntry(name, result.result, null);
       } else {
-        output.innerHTML += `<div class="fail">Error: ${escHtml(result.error || 'Unknown')}</div>`;
+        totalFailed += 1;
+        appendLogEntry(name, null, result.error || 'Unknown error');
       }
     } catch (e) {
-      output.innerHTML += `<div class="fail">Error: ${escHtml(e.message||String(e))}</div>`;
+      totalFailed += 1;
+      appendLogEntry(name, null, e.message || String(e));
     }
-    output.scrollTop = output.scrollHeight;
   }
-  output.innerHTML += `<div style="border-top:1px solid #334155;padding-top:8px;margin-top:8px;color:#e2e8f0;font-weight:600;">Done. Total: ${totalPassed} passed, ${totalFailed} failed</div>`;
-  output.innerHTML += `<a href="/results" target="_blank" style="color:#38bdf8;">View Results Dashboard</a>`;
+  appendLogSummary(totalPassed, totalFailed, checked.length);
   btn.disabled = false;
-  btn.textContent = `Run Selected (${checked.length})`;
   onWfCheckChange();
+  showToast(`Batch done: ${totalPassed} passed, ${totalFailed} failed`, totalFailed > 0 ? 'error' : 'success');
   try { await api('/api/rebuild', { method: 'POST' }); } catch {}
 }
 
+// --- Editor ---
 async function editWorkflow(name) {
   try {
     const res = await fetch(API + '/api/workflow-file?name=' + encodeURIComponent(name));
@@ -324,13 +505,18 @@ async function editWorkflow(name) {
     document.getElementById('save-btn').disabled = false;
     document.getElementById('run-btn').disabled = false;
     editor.setValue(content);
+    switchTab('editor');
   } catch (e) {
     showToast('Failed to load: ' + (e.message||e), 'error');
   }
 }
 
 async function saveWorkflow() {
-  if (!currentFile) return;
+  if (!currentFile) {
+    currentFile = prompt('Enter filename (e.g. wf-my-test.yaml):');
+    if (!currentFile) return;
+    if (!currentFile.match(/\.(yaml|yml)$/)) currentFile += '.yaml';
+  }
   try {
     await api('/api/workflow-file', {
       method: 'PUT',
@@ -345,83 +531,15 @@ async function saveWorkflow() {
   }
 }
 
-async function runWorkflow(name) {
-  const output = document.getElementById('run-output');
-  output.className = 'run-output active';
-  output.textContent = 'Running ' + name + '...\n';
-  try {
-    const result = await api('/api/run-workflow', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ name: name, sessionId: 'dash-' + Date.now() })
-    });
-    const r = result.result;
-    if (r) {
-      output.innerHTML = `<strong>${escHtml(r.name)}</strong><br>`;
-      output.innerHTML += `Status: ${r.passed} passed, ${r.failed} failed, ${r.total} total<br>`;
-      output.innerHTML += `Duration: ${(r.steps||[]).reduce((s,st) => s + (st.duration||0), 0)}ms<br><br>`;
-      for (const step of (r.steps||[])) {
-        const icon = step.status === 'passed' ? '✓' : '✗';
-        const cls = step.status === 'passed' ? 'pass' : 'fail';
-        output.innerHTML += `<span class="${cls}">${icon} Step ${step.step}: ${step.tool} - ${step.status}${step.error ? ' ('+escHtml(step.error)+')' : ''}</span><br>`;
-      }
-      output.innerHTML += '<br><a href="/" target="_blank" style="color:#38bdf8;">View Results Dashboard</a>';
-    } else {
-      output.textContent = result.error || JSON.stringify(result, null, 2);
-    }
-    showToast('Workflow completed', 'success');
-    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
-  } catch (e) {
-    output.textContent += '\nError: ' + (e.message||e);
-    showToast('Run failed', 'error');
-  }
-}
-
-async function runCurrentWorkflow() {
-  if (!currentFile) return;
-  const output = document.getElementById('run-output');
-  output.className = 'run-output active';
-  output.textContent = 'Running ' + currentFile + '...\n';
-  try {
-    // Get the full path from workflows dir
-    const homeDir = await api('/api/workflow-file?name=' + encodeURIComponent(currentFile));
-    // We'll use the yaml content directly
-    const yamlContent = editor.getValue();
-    const result = await api('/api/run-workflow', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ yaml: yamlContent, sessionId: 'dash-' + Date.now() })
-    });
-    const r = result.result;
-    if (r) {
-      output.textContent = `Workflow: ${r.name}\n`;
-      output.textContent += `Status: ${r.passed} passed, ${r.failed} failed, ${r.total} total\n`;
-      output.textContent += `Duration: ${r.steps?.reduce((s, st) => s + (st.duration||0), 0) || 0}ms\n\n`;
-      for (const step of (r.steps||[])) {
-        const icon = step.status === 'passed' ? '✓' : '✗';
-        const cls = step.status === 'passed' ? 'pass' : 'fail';
-        output.innerHTML += `<span class="${cls}">${icon} Step ${step.step}: ${step.tool} - ${step.status}${step.error ? ' ('+step.error+')' : ''}</span>\n`;
-      }
-      output.innerHTML += '\n<a href="/" target="_blank" style="color:#38bdf8;">View Results Dashboard</a>';
-    }
-    showToast('Workflow completed', 'success');
-    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
-  } catch (e) {
-    output.textContent += '\nError: ' + (e.message||e);
-    showToast('Run failed', 'error');
-  }
-}
-
 function newWorkflow() {
   currentFile = null;
   originalContent = '';
   document.getElementById('editor-filename').textContent = 'New workflow (save to name it)';
   document.getElementById('save-btn').disabled = false;
   document.getElementById('run-btn').disabled = true;
-  const template = `name: New Workflow\ndescription: Describe what this workflow tests\ngroup: Demo\nstopOnFail: false\nsteps:\n  - navigate: http://localhost:${PORT}/test/\n  - wait: 1000\n  - smart_click: "Sign Up"\n  - smart_fill:\n      target: "Enter your full name"\n      value: "Test User"\n`;
+  const template = `name: New Workflow\ndescription: Describe what this workflow tests\ngroup: Demo\nstopOnFail: false\nsteps:\n  - navigate: /test/\n  - wait: 1000\n  - smart_click: "Sign Up"\n  - smart_fill:\n      target: "Enter your full name"\n      value: "Test User"\n`;
   editor.setValue(template);
-  // Prompt for filename on save
-  editor.focus();
+  switchTab('editor');
 }
 
 async function uploadWorkflow(event) {
@@ -432,8 +550,9 @@ async function uploadWorkflow(event) {
   originalContent = content;
   document.getElementById('editor-filename').textContent = file.name;
   document.getElementById('save-btn').disabled = false;
+  document.getElementById('run-btn').disabled = false;
   editor.setValue(content);
-  // Save to server
+  switchTab('editor');
   try {
     await api('/api/workflow-file', {
       method: 'PUT',
@@ -448,7 +567,7 @@ async function uploadWorkflow(event) {
 }
 
 function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function escAttr(s) { return (s||'').replace(/'/g, "\\'"); }
+function escAttr(s) { return (s||'').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 
 // Init
 document.addEventListener('DOMContentLoaded', () => {
@@ -459,15 +578,6 @@ document.addEventListener('DOMContentLoaded', () => {
     tabSize: 2,
     indentWithTabs: false,
     lineWrapping: true,
-  });
-  // Override save to create new file if needed
-  document.getElementById('save-btn').addEventListener('click', async () => {
-    if (!currentFile) {
-      currentFile = prompt('Enter filename (e.g. wf-my-test.yaml):');
-      if (!currentFile) return;
-      if (!currentFile.match(/\.(yaml|yml)$/)) currentFile += '.yaml';
-    }
-    await saveWorkflow();
   });
   refreshTabs();
   refreshWorkflows();

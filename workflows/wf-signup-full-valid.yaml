@@ -2,7 +2,7 @@ name: Signup - Full Valid Form
 description: Verify that a correctly filled signup form submits successfully and shows "Submitted!" confirmation
 group: Signup/Pass
 steps:
-  - navigate: http://localhost:9223/test/
+  - navigate: /test/
   - wait: 1000
   - smart_fill:
       target: Enter your full name

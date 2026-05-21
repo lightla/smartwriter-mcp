@@ -3,7 +3,7 @@ description: Verify that submitting login with empty email/password shows valida
 group: Login/Fail
 stopOnFail: false
 steps:
-  - navigate: http://localhost:9223/test/
+  - navigate: /test/
   - wait: 1000
   - click:
       selector: 'a[onclick*="login"]'

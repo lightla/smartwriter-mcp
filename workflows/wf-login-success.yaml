@@ -2,7 +2,7 @@ name: Login - Valid Credentials
 description: Verify that logging in with a registered email shows "Welcome back!" confirmation message
 group: Login/Pass
 steps:
-  - navigate: http://localhost:9223/test/
+  - navigate: /test/
   - wait: 1000
   - click:
       selector: 'a[onclick*="login"]'

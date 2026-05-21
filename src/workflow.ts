@@ -209,6 +209,31 @@ export async function runWorkflow(
   let passed = 0;
   let failed = 0;
 
+  // Get connected tab origin for resolving relative URLs
+  let tabOrigin = '';
+  try {
+    const tabInfo = await sendToExtension('GET_CONNECTED_TAB_INFO', {}) as { url?: string };
+    if (tabInfo.url) {
+      const u = new URL(tabInfo.url);
+      tabOrigin = u.origin;
+    }
+  } catch { /* no connected tab info */ }
+
+  // Resolve relative navigate URLs against connected tab origin
+  // Supports: /test (relative path) → http://localhost:9225/test
+  //           localhost:9225/test (domain only, no protocol) → http://localhost:9225/test
+  for (const step of steps) {
+    if (step.tool === 'navigate' && step.args.url && typeof step.args.url === 'string') {
+      const url = step.args.url;
+      if (url.startsWith('/')) {
+        step.args.url = tabOrigin + url;
+      } else if (!url.startsWith('http://') && !url.startsWith('https://') && url.includes('/')) {
+        // Looks like "domain/path" without protocol — prepend http://
+        step.args.url = 'http://' + url;
+      }
+    }
+  }
+
   // Fetch workflow settings from extension
   let screenshotEnabled = true;
   let recordingEnabled = true;

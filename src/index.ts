@@ -7,10 +7,11 @@ import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import net from 'net';
 import { execSync, execFileSync, spawn, ChildProcess } from 'child_process';
-import { realpathSync, existsSync, statSync, readFileSync } from 'fs';
+import { realpathSync, existsSync, statSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import { runWorkflow, formatReport, deleteWorkflowResult, deleteWorkflowGroup, deleteWorkflowSession } from './workflow.js';
+import yaml from 'js-yaml';
 
 const DEFAULT_PORT = 9223;
 
@@ -211,6 +212,8 @@ const COMMAND_MAP: Record<string, string> = {
   assert_not_visible: 'ASSERT',
   assert_element: 'ASSERT',
   assert_not_element: 'ASSERT',
+  highlight_target: 'HIGHLIGHT_TARGET',
+  remove_highlight: 'REMOVE_HIGHLIGHT',
   };
 
   const TOOLS = [
@@ -1117,6 +1120,7 @@ async function main() {
 
   // HTTP server for dashboard + WebSocket upgrade
   const WORKFLOWS_DIR = path.join(os.homedir(), '.smartwriter', 'workflows');
+  const TEST_APP_DIR = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'test', 'sample-app');
   const MIME_TYPES: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
     '.css': 'text/css',
@@ -1128,7 +1132,7 @@ async function main() {
     '.mp4': 'video/mp4',
   };
 
-  const httpServer = http.createServer((req, res) => {
+  const httpServer = http.createServer(async (req, res) => {
     const urlPath = req.url?.split('?')[0] || '/';
 
     // API endpoints for delete operations
@@ -1185,9 +1189,213 @@ async function main() {
       return;
     }
 
+    // API: List workflow YAML files
+    if (req.method === 'GET' && urlPath === '/api/workflows') {
+      try {
+        // Scan both ~/.smartwriter/workflows/ and project workflows/ dir
+        const dirs = [WORKFLOWS_DIR, path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'workflows')];
+        const allFiles = new Map<string, { name: string; filePath: string; displayName: string; description: string; group: string }>();
+        for (const wfDir of dirs) {
+          if (!existsSync(wfDir)) continue;
+          const files = readdirSync(wfDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+          for (const f of files) {
+            if (allFiles.has(f)) continue; // prefer first found
+            try {
+              const content = readFileSync(path.join(wfDir, f), 'utf-8');
+              const parsed = yaml.load(content) as any;
+              allFiles.set(f, { name: f, filePath: path.join(wfDir, f), displayName: parsed?.name || f.replace(/\.(yaml|yml)$/, ''), description: parsed?.description || '', group: parsed?.group || '' });
+            } catch { allFiles.set(f, { name: f, filePath: path.join(wfDir, f), displayName: f, description: '', group: '' }); }
+          }
+        }
+        const workflows = [...allFiles.values()].sort((a, b) => a.name.localeCompare(b.name));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(workflows));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
+      return;
+    }
+
+    // API: Read a workflow YAML file
+    if (req.method === 'GET' && urlPath.startsWith('/api/workflow-file')) {
+      const name = new URL(urlPath, 'http://localhost').searchParams.get('name');
+      if (!name) { res.writeHead(400); res.end('Missing name parameter'); return; }
+      // Search in project workflows/ dir first, then ~/.smartwriter/workflows/
+      const projectWfDir = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'workflows');
+      const searchDirs = [projectWfDir, WORKFLOWS_DIR];
+      let filePath = '';
+      for (const dir of searchDirs) {
+        const candidate = path.join(dir, name);
+        if (existsSync(candidate)) { filePath = candidate; break; }
+      }
+      if (!filePath) { res.writeHead(404); res.end('Not found'); return; }
+      try {
+        const content = readFileSync(filePath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/yaml' });
+        res.end(content);
+      } catch { res.writeHead(500); res.end('Error reading file'); }
+      return;
+    }
+
+    // API: Save a workflow YAML file
+    if (req.method === 'PUT' && urlPath === '/api/workflow-file') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { name, content } = JSON.parse(body);
+          if (!name || !content) { res.writeHead(400); res.end('Missing name or content'); return; }
+          const filePath = path.join(WORKFLOWS_DIR, name);
+          if (!filePath.startsWith(WORKFLOWS_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+          mkdirSync(path.dirname(filePath), { recursive: true });
+          writeFileSync(filePath, content, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', name }));
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+        }
+      });
+      return;
+    }
+
+    // API: Run a workflow (trigger via WebSocket to extension)
+    if (req.method === 'POST' && urlPath === '/api/run-workflow') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { path: wfPath, yaml: wfYaml, sessionId, name: wfName } = JSON.parse(body);
+          let resolvedPath = wfPath;
+          let resolvedYaml = wfYaml;
+          // If name is provided, resolve it to a file path
+          if (wfName && !wfPath && !wfYaml) {
+            const projectWfDir = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'workflows');
+            for (const dir of [projectWfDir, WORKFLOWS_DIR]) {
+              const candidate = path.join(dir, wfName);
+              if (existsSync(candidate)) {
+                resolvedPath = candidate;
+                break;
+              }
+            }
+          }
+          if (!resolvedPath && !resolvedYaml) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Provide path, yaml, or name parameter' }));
+            return;
+          }
+          const result = await runWorkflow(
+            { path: resolvedPath, yaml: resolvedYaml, sessionId },
+            (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs)
+          );
+          const report = formatReport(result);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ result, report }));
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+        }
+      });
+      return;
+    }
+
+    // API: Tabs (proxied from extension)
+    if (req.method === 'GET' && urlPath === '/api/tabs') {
+      try {
+        const tabs = await sendToExtension('GET_TABS', {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(tabs));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
+      return;
+    }
+
+    // API: Connected tab info
+    if (req.method === 'GET' && urlPath === '/api/connected-tab') {
+      try {
+        const info = await sendToExtension('GET_CONNECTED_TAB_INFO', {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(info));
+      } catch (e) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ connected: false, error: e instanceof Error ? e.message : String(e) }));
+      }
+      return;
+    }
+
+    // API: Connect to a tab
+    if (req.method === 'POST' && urlPath === '/api/connect-tab') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { tabId } = JSON.parse(body);
+          const result = await sendToExtension('CONNECT_TAB', { tabId });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+        }
+      });
+      return;
+    }
+
+    // API: Disconnect tab
+    if (req.method === 'POST' && urlPath === '/api/disconnect-tab') {
+      try {
+        const result = await sendToExtension('DISCONNECT_TAB', {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
+      return;
+    }
+
     let filePath: string;
-    if (urlPath === '/' || urlPath === '/index.html') {
+    if (urlPath === '/home' || urlPath === '/home/' || urlPath === '/home/index.html') {
+      // Serve dashboard home page
+      const homePagePath = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'src', 'dashboard-home.html');
+      if (existsSync(homePagePath)) {
+        const data = readFileSync(homePagePath);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(data);
+        return;
+      }
+      res.writeHead(404);
+      res.end('Home page not found');
+      return;
+    } else if (urlPath === '/' || urlPath === '/index.html') {
       filePath = path.join(WORKFLOWS_DIR, 'index.html');
+    } else if (urlPath.startsWith('/test/') || urlPath === '/test') {
+      // Serve test/sample-app
+      const testPath = urlPath === '/test' || urlPath === '/test/' ? '/index.html' : urlPath.slice('/test'.length);
+      filePath = path.join(TEST_APP_DIR, testPath || '/index.html');
+      if (!filePath.startsWith(TEST_APP_DIR)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+        filePath = path.join(TEST_APP_DIR, 'index.html');
+      }
+      // Serve directly, bypass WORKFLOWS_DIR check
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      try {
+        const data = readFileSync(filePath);
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
+        res.end(data);
+      } catch {
+        res.writeHead(500);
+        res.end('Internal error');
+      }
+      return;
     } else {
       filePath = path.join(WORKFLOWS_DIR, urlPath);
     }

@@ -3,7 +3,7 @@ description: Verify that submitting without agreeing to terms shows "must agree"
 group: Signup/Fail
 stopOnFail: false
 steps:
-  - navigate: http://localhost:8888/test-validation.html
+  - navigate: http://localhost:9223/test/
   - wait: 1000
   - smart_fill:
       target: Enter your full name

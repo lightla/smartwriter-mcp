@@ -3,22 +3,54 @@
 
 const canvas = document.getElementById('recording-canvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
+
+// Pre-size canvas to 1280x720 so captureStream starts with correct dimensions
+canvas.width = 1280;
+canvas.height = 720;
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
 let mediaRecorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
 let isRecording = false;
-let lastFrameTime = 0;
-const FPS = 10;
-const FRAME_INTERVAL = 1000 / FPS;
-let animFrameId = 0;
 
-// Draw a frame on canvas from base64 PNG data
+// Frame queue to prevent race conditions
+let pendingFrames: string[] = [];
+let isDrawing = false;
+
+// Draw a frame on canvas from base64 PNG data (sequential queue)
 function drawFrame(base64Data: string): void {
+  pendingFrames.push(base64Data);
+  if (!isDrawing) processNextFrame();
+}
+
+function processNextFrame(): void {
+  if (isDrawing || pendingFrames.length === 0) return;
+  isDrawing = true;
+
+  const base64Data = pendingFrames.shift()!;
+
+  // Drop frames if queue is too large (keep up with real-time)
+  while (pendingFrames.length > 3) {
+    pendingFrames.shift();
+  }
+
   const img = new Image();
   img.onload = () => {
     canvas.width = img.naturalWidth || 1280;
     canvas.height = img.naturalHeight || 720;
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(img.src);
+    isDrawing = false;
+    if (pendingFrames.length > 0) {
+      processNextFrame();
+    }
+  };
+  img.onerror = () => {
+    isDrawing = false;
+    if (pendingFrames.length > 0) {
+      processNextFrame();
+    }
   };
   img.src = `data:image/png;base64,${base64Data}`;
 }
@@ -27,8 +59,10 @@ function drawFrame(base64Data: string): void {
 function startRecording(): void {
   if (isRecording) return;
   chunks = [];
+  pendingFrames = [];
+  isDrawing = false;
 
-  const stream = canvas.captureStream(FPS);
+  const stream = canvas.captureStream(10);
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
     ? 'video/webm;codecs=vp9'
     : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
@@ -37,7 +71,7 @@ function startRecording(): void {
 
   mediaRecorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: 1000000, // 1 Mbps
+    videoBitsPerSecond: 2500000, // 2.5 Mbps for better quality
   });
 
   mediaRecorder.ondataavailable = (e: BlobEvent) => {
@@ -46,7 +80,7 @@ function startRecording(): void {
     }
   };
 
-  mediaRecorder.start(1000); // emit data every 1 second
+  mediaRecorder.start(500); // emit data every 500ms for smoother video
   isRecording = true;
 }
 
@@ -58,20 +92,22 @@ async function stopRecording(): Promise<string> {
       return;
     }
 
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        // Return base64 encoded webm (strip data:video/webm;base64, prefix)
-        const base64 = reader.result as string;
-        resolve(base64.split(',')[1] || '');
+    // Wait a brief moment to ensure last frame is drawn
+    setTimeout(() => {
+      mediaRecorder!.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          resolve(base64.split(',')[1] || '');
+        };
+        reader.readAsDataURL(blob);
+        isRecording = false;
+        mediaRecorder = null;
       };
-      reader.readAsDataURL(blob);
-      isRecording = false;
-      mediaRecorder = null;
-    };
 
-    mediaRecorder.stop();
+      mediaRecorder!.stop();
+    }, 300);
   });
 }
 

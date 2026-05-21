@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smartwriter Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+.header { background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid #334155; padding: 20px 32px; display: flex; align-items: center; gap: 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #38bdf8; }
+.header .subtitle { color: #94a3b8; font-size: 13px; }
+.nav-links { margin-left: auto; display: flex; gap: 12px; }
+.nav-links a { color: #94a3b8; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; transition: all 0.15s; }
+.nav-links a:hover { background: #1e293b; color: #e2e8f0; }
+.main { max-width: 1200px; margin: 0 auto; padding: 24px 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+.card h2 { font-size: 16px; font-weight: 600; color: #38bdf8; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.card h2 .icon { font-size: 18px; }
+.full-width { grid-column: 1 / -1; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.status-dot.connected { background: #22c55e; }
+.status-dot.disconnected { background: #ef4444; }
+.tab-list { display: flex; flex-direction: column; gap: 8px; }
+.tab-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
+.tab-item.connected { border-color: #22c55e; }
+.tab-item .tab-info { flex: 1; min-width: 0; }
+.tab-item .tab-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-item .tab-url { font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-item .tab-id { font-size: 11px; color: #475569; font-family: monospace; }
+.btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+.btn-primary { background: #2563eb; color: white; }
+.btn-primary:hover { background: #1d4ed8; }
+.btn-secondary { background: #334155; color: #e2e8f0; }
+.btn-secondary:hover { background: #475569; }
+.btn-danger { background: #991b1b; color: #e2e8f0; }
+.btn-danger:hover { background: #b91c1c; }
+.btn-success { background: #059669; color: white; }
+.btn-success:hover { background: #047857; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.workflow-list { display: flex; flex-direction: column; gap: 8px; }
+.workflow-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
+.workflow-item .wf-info { flex: 1; min-width: 0; }
+.workflow-item .wf-name { font-size: 14px; font-weight: 500; }
+.workflow-item .wf-desc { font-size: 12px; color: #64748b; }
+.workflow-item .wf-group { font-size: 11px; color: #475569; }
+.editor-container { display: none; margin-top: 12px; }
+.editor-container.active { display: block; }
+.editor-toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.editor-toolbar .filename { font-size: 13px; color: #94a3b8; font-family: monospace; }
+.CodeMirror { height: 400px; border-radius: 8px; border: 1px solid #334155; }
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; z-index: 9999; transition: opacity 0.3s; opacity: 0; }
+.toast.show { opacity: 1; }
+.toast.success { background: #059669; color: white; }
+.toast.error { background: #991b1b; color: white; }
+.toast.info { background: #2563eb; color: white; }
+.run-output { margin-top: 12px; background: #0f172a; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; display: none; }
+.run-output.active { display: block; }
+.run-output .pass { color: #22c55e; }
+.run-output .fail { color: #ef4444; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Smartwriter</h1>
+  <span class="subtitle">Workflow Dashboard</span>
+  <div class="nav-links">
+    <a href="/home/">Home</a>
+    <a href="/">Results</a>
+    <a href="/test/">Sample App</a>
+  </div>
+</div>
+
+<div class="main">
+  <!-- Connected Tab -->
+  <div class="card">
+    <h2><span class="icon">&#9654;</span> Connected Tab <span class="status-dot disconnected" id="status-dot"></span></h2>
+    <div id="connected-info" style="color:#64748b;font-size:13px;">Not connected</div>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="launchSampleApp()">Start Sample App</button>
+      <button class="btn btn-secondary" onclick="refreshTabs()">Refresh Tabs</button>
+    </div>
+  </div>
+
+  <!-- Tab List -->
+  <div class="card">
+    <h2><span class="icon">&#128449;</span> Chrome Tabs</h2>
+    <div id="tab-list" class="tab-list">
+      <div style="color:#64748b;font-size:13px;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Workflow List -->
+  <div class="card">
+    <h2><span class="icon">&#9881;</span> Workflows</h2>
+    <div style="margin-bottom:10px;display:flex;gap:8px;">
+      <button class="btn btn-sm btn-secondary" onclick="refreshWorkflows()">Refresh</button>
+      <button class="btn btn-sm btn-success" onclick="newWorkflow()">New</button>
+      <label class="btn btn-sm btn-secondary" style="cursor:pointer;">Upload <input type="file" accept=".yaml,.yml" onchange="uploadWorkflow(event)" style="display:none;"></label>
+    </div>
+    <div id="workflow-list" class="workflow-list">
+      <div style="color:#64748b;font-size:13px;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Workflow Editor -->
+  <div class="card">
+    <h2><span class="icon">&#9998;</span> YAML Editor</h2>
+    <div class="editor-toolbar">
+      <span class="filename" id="editor-filename">No file selected</span>
+      <button class="btn btn-sm btn-primary" onclick="saveWorkflow()" id="save-btn" disabled>Save</button>
+      <button class="btn btn-sm btn-success" onclick="runCurrentWorkflow()" id="run-btn" disabled>Run</button>
+    </div>
+    <div class="editor-container active">
+      <textarea id="yaml-editor"></textarea>
+    </div>
+    <div class="run-output" id="run-output"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/yaml/yaml.min.js"></script>
+<script>
+const PORT = location.port || 9223;
+const API = '';
+let editor = null;
+let currentFile = null;
+let originalContent = '';
+
+function showToast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.className = 'toast ' + type, 2500);
+}
+
+async function api(path, opts={}) {
+  const res = await fetch(API + path, opts);
+  return res.json();
+}
+
+// Tabs
+async function refreshTabs() {
+  try {
+    const tabs = await api('/api/tabs');
+    const list = document.getElementById('tab-list');
+    if (!tabs || tabs.length === 0) {
+      list.innerHTML = '<div style="color:#64748b;font-size:13px;">No tabs found. Open some tabs in Chrome and connect the extension.</div>';
+      return;
+    }
+    list.innerHTML = tabs.map(t => `
+      <div class="tab-item">
+        <div class="tab-info">
+          <div class="tab-title">${escHtml(t.title||'Untitled')}</div>
+          <div class="tab-url">${escHtml(t.url||'')}</div>
+          <div class="tab-id">tabId: ${t.tabId}</div>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="connectTab(${t.tabId})">Connect</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('tab-list').innerHTML = '<div style="color:#ef4444;font-size:13px;">Extension not connected</div>';
+  }
+  refreshConnectedTab();
+}
+
+async function refreshConnectedTab() {
+  const dot = document.getElementById('status-dot');
+  const info = document.getElementById('connected-info');
+  try {
+    const tab = await api('/api/connected-tab');
+    if (tab.connected === false) throw new Error('Not connected');
+    dot.className = 'status-dot connected';
+    info.innerHTML = `<strong>${escHtml(tab.title||'')}</strong><br><span style="color:#64748b;font-size:12px;">${escHtml(tab.url||'')} (tabId: ${tab.tabId})</span>`;
+  } catch {
+    dot.className = 'status-dot disconnected';
+    info.textContent = 'Not connected';
+  }
+}
+
+async function connectTab(tabId) {
+  try {
+    await api('/api/connect-tab', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({tabId}) });
+    showToast('Connected to tab ' + tabId, 'success');
+    refreshTabs();
+  } catch (e) {
+    showToast('Connect failed: ' + (e.message||e), 'error');
+  }
+}
+
+async function launchSampleApp() {
+  try {
+    await api('/api/connect-tab', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
+  } catch {}
+  // Navigate connected tab to sample app
+  try {
+    const ws = new WebSocket(`ws://localhost:${PORT}`);
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'COMMAND', command: 'NAVIGATE', requestId: 'nav-' + Date.now(), args: { url: `http://localhost:${PORT}/test/` } }));
+    };
+    showToast('Navigating to sample app...', 'info');
+  } catch (e) {
+    showToast('Failed: ' + (e.message||e), 'error');
+  }
+}
+
+// Workflows
+async function refreshWorkflows() {
+  try {
+    const workflows = await api('/api/workflows');
+    const list = document.getElementById('workflow-list');
+    if (!workflows || workflows.length === 0) {
+      list.innerHTML = '<div style="color:#64748b;font-size:13px;">No workflow files found. Create one or upload.</div>';
+      return;
+    }
+    list.innerHTML = workflows.map(w => `
+      <div class="workflow-item">
+        <div class="wf-info">
+          <div class="wf-name">${escHtml(w.displayName)}</div>
+          ${w.description ? '<div class="wf-desc">'+escHtml(w.description)+'</div>' : ''}
+          ${w.group ? '<div class="wf-group">'+escHtml(w.group)+'</div>' : ''}
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="editWorkflow('${escAttr(w.name)}')">Edit</button>
+        <button class="btn btn-sm btn-success" onclick="runWorkflow('${escAttr(w.name)}')">Run</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('workflow-list').innerHTML = '<div style="color:#ef4444;font-size:13px;">Failed to load workflows</div>';
+  }
+}
+
+async function editWorkflow(name) {
+  try {
+    const res = await fetch(API + '/api/workflow-file?name=' + encodeURIComponent(name));
+    const content = await res.text();
+    currentFile = name;
+    originalContent = content;
+    document.getElementById('editor-filename').textContent = name;
+    document.getElementById('save-btn').disabled = false;
+    document.getElementById('run-btn').disabled = false;
+    editor.setValue(content);
+  } catch (e) {
+    showToast('Failed to load: ' + (e.message||e), 'error');
+  }
+}
+
+async function saveWorkflow() {
+  if (!currentFile) return;
+  try {
+    await api('/api/workflow-file', {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: currentFile, content: editor.getValue() })
+    });
+    showToast('Saved ' + currentFile, 'success');
+    originalContent = editor.getValue();
+    refreshWorkflows();
+  } catch (e) {
+    showToast('Save failed: ' + (e.message||e), 'error');
+  }
+}
+
+async function runWorkflow(name) {
+  const output = document.getElementById('run-output');
+  output.className = 'run-output active';
+  output.textContent = 'Running ' + name + '...\n';
+  try {
+    const result = await api('/api/run-workflow', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: name, sessionId: 'dash-' + Date.now() })
+    });
+    const r = result.result;
+    if (r) {
+      output.innerHTML = `<strong>${escHtml(r.name)}</strong><br>`;
+      output.innerHTML += `Status: ${r.passed} passed, ${r.failed} failed, ${r.total} total<br>`;
+      output.innerHTML += `Duration: ${(r.steps||[]).reduce((s,st) => s + (st.duration||0), 0)}ms<br><br>`;
+      for (const step of (r.steps||[])) {
+        const icon = step.status === 'passed' ? '✓' : '✗';
+        const cls = step.status === 'passed' ? 'pass' : 'fail';
+        output.innerHTML += `<span class="${cls}">${icon} Step ${step.step}: ${step.tool} - ${step.status}${step.error ? ' ('+escHtml(step.error)+')' : ''}</span><br>`;
+      }
+      output.innerHTML += '<br><a href="/" target="_blank" style="color:#38bdf8;">View Results Dashboard</a>';
+    } else {
+      output.textContent = result.error || JSON.stringify(result, null, 2);
+    }
+    showToast('Workflow completed', 'success');
+    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
+  } catch (e) {
+    output.textContent += '\nError: ' + (e.message||e);
+    showToast('Run failed', 'error');
+  }
+}
+
+async function runCurrentWorkflow() {
+  if (!currentFile) return;
+  const output = document.getElementById('run-output');
+  output.className = 'run-output active';
+  output.textContent = 'Running ' + currentFile + '...\n';
+  try {
+    // Get the full path from workflows dir
+    const homeDir = await api('/api/workflow-file?name=' + encodeURIComponent(currentFile));
+    // We'll use the yaml content directly
+    const yamlContent = editor.getValue();
+    const result = await api('/api/run-workflow', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ yaml: yamlContent, sessionId: 'dash-' + Date.now() })
+    });
+    const r = result.result;
+    if (r) {
+      output.textContent = `Workflow: ${r.name}\n`;
+      output.textContent += `Status: ${r.passed} passed, ${r.failed} failed, ${r.total} total\n`;
+      output.textContent += `Duration: ${r.steps?.reduce((s, st) => s + (st.duration||0), 0) || 0}ms\n\n`;
+      for (const step of (r.steps||[])) {
+        const icon = step.status === 'passed' ? '✓' : '✗';
+        const cls = step.status === 'passed' ? 'pass' : 'fail';
+        output.innerHTML += `<span class="${cls}">${icon} Step ${step.step}: ${step.tool} - ${step.status}${step.error ? ' ('+step.error+')' : ''}</span>\n`;
+      }
+      output.innerHTML += '\n<a href="/" target="_blank" style="color:#38bdf8;">View Results Dashboard</a>';
+    }
+    showToast('Workflow completed', 'success');
+    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
+  } catch (e) {
+    output.textContent += '\nError: ' + (e.message||e);
+    showToast('Run failed', 'error');
+  }
+}
+
+function newWorkflow() {
+  currentFile = null;
+  originalContent = '';
+  document.getElementById('editor-filename').textContent = 'New workflow (save to name it)';
+  document.getElementById('save-btn').disabled = false;
+  document.getElementById('run-btn').disabled = true;
+  const template = `name: New Workflow\ndescription: Describe what this workflow tests\ngroup: Demo\nstopOnFail: false\nsteps:\n  - navigate: http://localhost:${PORT}/test/\n  - wait: 1000\n  - smart_click: "Sign Up"\n  - smart_fill:\n      target: "Enter your full name"\n      value: "Test User"\n`;
+  editor.setValue(template);
+  // Prompt for filename on save
+  editor.focus();
+}
+
+async function uploadWorkflow(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const content = await file.text();
+  currentFile = file.name;
+  originalContent = content;
+  document.getElementById('editor-filename').textContent = file.name;
+  document.getElementById('save-btn').disabled = false;
+  editor.setValue(content);
+  // Save to server
+  try {
+    await api('/api/workflow-file', {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: file.name, content })
+    });
+    showToast('Uploaded ' + file.name, 'success');
+    refreshWorkflows();
+  } catch (e) {
+    showToast('Upload failed: ' + (e.message||e), 'error');
+  }
+}
+
+function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s) { return (s||'').replace(/'/g, "\\'"); }
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+  editor = CodeMirror.fromTextArea(document.getElementById('yaml-editor'), {
+    mode: 'yaml',
+    lineNumbers: true,
+    theme: 'monokai',
+    tabSize: 2,
+    indentWithTabs: false,
+    lineWrapping: true,
+  });
+  // Override save to create new file if needed
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    if (!currentFile) {
+      currentFile = prompt('Enter filename (e.g. wf-my-test.yaml):');
+      if (!currentFile) return;
+      if (!currentFile.match(/\.(yaml|yml)$/)) currentFile += '.yaml';
+    }
+    await saveWorkflow();
+  });
+  refreshTabs();
+  refreshWorkflows();
+});
+</script>
+</body>
+</html>

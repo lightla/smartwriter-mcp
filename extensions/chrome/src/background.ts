@@ -1213,8 +1213,8 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
           justification: 'Recording workflow as video',
         });
         offscreenDocumentReady = true;
-        // Small delay to let offscreen document initialize
-        await new Promise(r => setTimeout(r, 100));
+        // Delay to let offscreen document initialize
+        await new Promise(r => setTimeout(r, 200));
       } catch (e: any) {
         // Document may already exist
         if (!e.message?.includes('Only a single offscreen')) {
@@ -1228,11 +1228,14 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
         await chrome.runtime.sendMessage({ type: 'OFFSCREEN_START_RECORDING' });
       } catch { /* best-effort */ }
 
+      // Delay before starting screencast to let MediaRecorder initialize
+      await new Promise(r => setTimeout(r, 200));
+
       await ensureDebuggerAttached(connectedTabId);
-      // Start screencast at ~10fps for video
+      // Start screencast at ~10fps for video, quality 100 for sharpness
       try {
         await withCallback<void>((cb) =>
-          chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Page.startScreencast', { format: 'png', quality: 80, maxWidth: 1280, maxHeight: 720 }, cb)
+          chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Page.startScreencast', { format: 'png', quality: 100, maxWidth: 1280, maxHeight: 720 }, cb)
         );
       } catch {
         // Screencast not available in all contexts
@@ -1243,7 +1246,7 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
     case 'STOP_RECORDING': {
       recordingActive = false;
 
-      // Stop screencast
+      // Stop screencast first
       try {
         if (connectedTabId) {
           await withCallback<void>((cb) =>
@@ -1251,6 +1254,9 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
           ).catch(() => {});
         }
       } catch { /* best-effort */ }
+
+      // Delay to allow last screencast frame to be processed
+      await new Promise(r => setTimeout(r, 300));
 
       // Stop MediaRecorder in offscreen document and get webm
       let webmBase64 = '';
@@ -1649,6 +1655,14 @@ ${finalScript}`;
       if (!connectedTabId) throw new Error('No tab connected.');
       await chrome.tabs.update(connectedTabId, { active: true });
       return { success: true, connectedTabId };
+
+    case 'HIGHLIGHT_TARGET':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      return sendContentCommand(connectedTabId, 'HIGHLIGHT_TARGET', args);
+
+    case 'REMOVE_HIGHLIGHT':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      return sendContentCommand(connectedTabId, 'REMOVE_HIGHLIGHT', {});
 
     case 'ASSERT':
       if (!connectedTabId) throw new Error('No tab connected.');

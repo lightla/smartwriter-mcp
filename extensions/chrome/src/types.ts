@@ -29,6 +29,8 @@ export type ContentMessage =
   | { type: 'GET_COMPONENT_ORIGIN'; selector?: string; elementRef?: string }
   | { type: 'RESOLVE_TARGET'; target: string; force?: boolean }
   | { type: 'ASSERT'; conditions: Record<string, string> }
+  | { type: 'HIGHLIGHT_TARGET'; selector?: string; elementRef?: string }
+  | { type: 'REMOVE_HIGHLIGHT' }
   | { type: 'TOGGLE_TRACKING'; active: boolean; flowMarker?: string }
   | { type: 'TAB_FLOW_STATE_CHANGE'; enabled: boolean; flowMarker?: string }
   | { type: 'UNREGISTER' };

@@ -205,6 +205,31 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
       case 'RESOLVE_TAGGED_ELEMENTS':
         result = handleResolveTaggedElements(message.data);
         break;
+      case 'HIGHLIGHT_TARGET': {
+        const hlEl = getElement(message.selector, message.elementRef);
+        hlEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+        await delay(50);
+        const hlRect = hlEl.getBoundingClientRect();
+        let hlOverlay = document.getElementById('__sw_highlight__');
+        if (!hlOverlay) {
+          hlOverlay = document.createElement('div');
+          hlOverlay.id = '__sw_highlight__';
+          (document.documentElement || document.body).appendChild(hlOverlay);
+        }
+        hlOverlay.style.left = `${hlRect.left}px`;
+        hlOverlay.style.top = `${hlRect.top}px`;
+        hlOverlay.style.width = `${hlRect.width}px`;
+        hlOverlay.style.height = `${hlRect.height}px`;
+        hlOverlay.style.display = 'block';
+        result = { success: true, rect: { x: Math.round(hlRect.left), y: Math.round(hlRect.top), width: Math.round(hlRect.width), height: Math.round(hlRect.height) } };
+        break;
+      }
+      case 'REMOVE_HIGHLIGHT': {
+        const existingHl = document.getElementById('__sw_highlight__');
+        if (existingHl) existingHl.style.display = 'none';
+        result = { success: true };
+        break;
+      }
       case 'UNREGISTER':
         result = { unregistered: true };
         break;
@@ -1590,6 +1615,37 @@ const TRACKING_CSS = `
   box-shadow: 0 0 0 4px rgba(181, 74, 67, 0.08) !important;
 }
 .__sw_picking__ * { cursor: crosshair !important; }
+/* ── Cursor dot ── */
+#__sw_cursor__ {
+  position: fixed; z-index: 2147483646;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 2px solid #fff;
+  box-shadow: 0 0 8px rgba(59,130,246,0.6);
+  pointer-events: none;
+  display: none;
+  transform: translate(-50%, -50%);
+  transition: left 0.15s ease, top 0.15s ease;
+}
+#__sw_cursor__.show { display: block; }
+#__sw_cursor__.pulse {
+  animation: __sw_pulse 0.3s ease-out;
+}
+@keyframes __sw_pulse {
+  0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+}
+/* ── Target highlight overlay ── */
+#__sw_highlight__ {
+  position: fixed; z-index: 2147483643;
+  border: 3px solid #3b82f6;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.12);
+  pointer-events: none;
+  display: none;
+  transition: top 0.1s ease, left 0.1s ease, width 0.1s ease, height 0.1s ease;
+}
 /* ── Annotation popup ── */
 #__sw_ann_popup__ {
   position: fixed; z-index: 2147483647;

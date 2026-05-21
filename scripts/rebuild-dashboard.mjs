@@ -228,6 +228,10 @@ function generateDashboard(results) {
 </head>
 <body>
 <div class="sidebar">
+  <div class="nav-links" style="display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid #334155;">
+    <a href="/home/" style="color:#38bdf8;text-decoration:none;font-size:12px;font-weight:600;">Home</a>
+    <a href="/test/" style="color:#94a3b8;text-decoration:none;font-size:12px;font-weight:600;">Sample App</a>
+  </div>
   <div class="tab-bar">
     <button class="tab-btn active" onclick="switchTab('groups')">Groups</button>
     <button class="tab-btn" onclick="switchTab('sessions')">Sessions</button>

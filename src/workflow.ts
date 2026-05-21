@@ -355,6 +355,23 @@ export async function runWorkflow(
         } catch { /* best-effort */ }
       }
 
+      // Highlight target before screenshot (for tools that target an element)
+      const isTargetTool = TARGET_TOOLS.has(command) || ['CLICK', 'TYPE', 'FILL', 'HOVER', 'SELECT', 'CHECK', 'UNCHECK', 'PRESS_KEY', 'PRESS_ENTER'].includes(command);
+      if (isTargetTool && screenshotEnabled) {
+        try {
+          const highlightArgs: Record<string, unknown> = {};
+          if (step.args.selector) highlightArgs.selector = step.args.selector;
+          if (step.args.elementRef) highlightArgs.elementRef = step.args.elementRef;
+          if (step.args.target) {
+            // For SMART_* tools, resolve the target first — highlight uses CSS selector or elementRef
+            // We'll send target as selector for now, the content script's getElement will resolve it
+            highlightArgs.selector = step.args.target;
+          }
+          await sendToExtension('HIGHLIGHT_TARGET', highlightArgs);
+          await new Promise<void>((r) => setTimeout(r, 100)); // Brief pause for highlight to render
+        } catch { /* best-effort — highlight not critical */ }
+      }
+
       // Capture screenshot
       let screenshot: string | undefined;
       let screenshotPath: string | undefined;
@@ -366,6 +383,13 @@ export async function runWorkflow(
             screenshot = ssResult.screenshot;
             stepLogs.push(`Screenshot saved: ${screenshotPath}`);
           }
+        } catch { /* best-effort */ }
+      }
+
+      // Remove highlight after screenshot
+      if (isTargetTool && screenshotEnabled) {
+        try {
+          await sendToExtension('REMOVE_HIGHLIGHT', {});
         } catch { /* best-effort */ }
       }
 
@@ -448,6 +472,11 @@ export async function runWorkflow(
       failed++;
       if (stopOnFail) break;
     }
+
+    // Ensure highlight is always removed after each step
+    try {
+      await sendToExtension('REMOVE_HIGHLIGHT', {});
+    } catch { /* best-effort */ }
   }
 
   // Stop observation

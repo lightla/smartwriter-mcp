@@ -1,0 +1,14 @@
+name: Fill form test
+group: Tests/Form
+steps:
+  - smart_fill:
+      target: Email
+      value: user@test.com
+  - smart_type:
+      target: Password
+      text: pass123
+  - smart_select_option:
+      target: Country
+      options: Vietnam
+  - smart_check: I agree to the terms
+  - smart_click: Submit

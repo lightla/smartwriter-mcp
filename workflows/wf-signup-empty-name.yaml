@@ -1,0 +1,19 @@
+name: Signup - Empty Name
+description: Verify that submitting form with empty full name shows "Full name is required" error and prevents submission
+group: Signup/Fail
+stopOnFail: false
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - smart_fill:
+      target: Enter your email
+      value: test@example.com
+  - smart_type:
+      target: Min 6 characters
+      text: secret123
+  - smart_check: I agree to the terms
+  - click:
+      selector: '#submit-btn'
+  - expect:
+      visible: "Full name is required"
+      not_visible: "Submitted"

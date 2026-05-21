@@ -3,6 +3,113 @@ import type { Annotation, TabInfo, McpCommand, McpResponse, TabsUpdate } from '.
 const DEFAULT_PORT = 9223;
 const RECONNECT_INTERVAL = 3000;
 
+// ==================== OBSERVATION BUFFER ====================
+interface ObservedEvent {
+  type: 'console_error' | 'js_exception' | 'network_error' | 'console_warn';
+  timestamp: string;
+  message: string;
+  url?: string;
+  status?: number;
+}
+
+let observeBuffer: ObservedEvent[] = [];
+let observeActive = false;
+let recordingFrames: string[] = [];
+let recordingActive = false;
+let offscreenDocumentReady = false;
+let offscreenFrameQueue: string[] = [];
+
+function setupDebuggerEventListener() {
+  chrome.debugger.onEvent.addListener((source, method, params: any) => {
+    // Screencast frame capture for recording
+    if (method === 'Page.screencastFrame' && recordingActive) {
+      const data = params?.data;
+      if (data) {
+        recordingFrames.push(data);
+        // Send frame to offscreen document for MediaRecorder encoding
+        if (offscreenDocumentReady) {
+          try {
+            chrome.runtime.sendMessage({ type: 'OFFSCREEN_DRAW_FRAME', data }).catch(() => {});
+          } catch { /* best-effort */ }
+        }
+        // Acknowledge the frame
+        const sessionId = params?.sessionId;
+        if (sessionId) {
+          chrome.debugger.sendCommand(source, 'Page.screencastFrameAck', { sessionId }, () => {});
+        }
+      }
+      return;
+    }
+
+    if (!observeActive) return;
+
+    if (method === 'Runtime.exceptionThrown') {
+      const detail = params?.exceptionDetails;
+      observeBuffer.push({
+        type: 'js_exception',
+        timestamp: new Date().toISOString(),
+        message: detail?.text || detail?.exception?.description || 'Uncaught exception',
+        url: detail?.url,
+      });
+    }
+
+    if (method === 'Runtime.consoleAPICalled') {
+      const type = params?.type;
+      if (type === 'error') {
+        const args = (params?.args || []).map((a: any) => a.value ?? a.description ?? '').join(' ');
+        observeBuffer.push({
+          type: 'console_error',
+          timestamp: new Date().toISOString(),
+          message: args,
+        });
+      } else if (type === 'warning') {
+        const args = (params?.args || []).map((a: any) => a.value ?? a.description ?? '').join(' ');
+        observeBuffer.push({
+          type: 'console_warn',
+          timestamp: new Date().toISOString(),
+          message: args,
+        });
+      }
+    }
+
+    if (method === 'Network.responseReceived') {
+      const status = params?.response?.status;
+      if (status && status >= 400) {
+        observeBuffer.push({
+          type: 'network_error',
+          timestamp: new Date().toISOString(),
+          message: `${params?.response?.statusText || 'Error'} (${status})`,
+          url: params?.response?.url,
+          status,
+        });
+      }
+    }
+
+    if (method === 'Network.loadingFailed') {
+      observeBuffer.push({
+        type: 'network_error',
+        timestamp: new Date().toISOString(),
+        message: params?.errorText || 'Loading failed',
+        url: params?.requestId,
+      });
+    }
+
+    if (method === 'Log.entryAdded') {
+      const entry = params?.entry;
+      if (entry?.level === 'error' || entry?.level === 'warning') {
+        observeBuffer.push({
+          type: entry.level === 'error' ? 'console_error' : 'console_warn',
+          timestamp: new Date().toISOString(),
+          message: entry.text || 'Log entry',
+          url: entry.url,
+        });
+      }
+    }
+  });
+}
+
+setupDebuggerEventListener();
+
 type ServerConfig = { port: number; name?: string };
 type ConnState = { ws: WebSocket | null; timer: ReturnType<typeof setTimeout> | null };
 type DebuggerEvaluateResult = {
@@ -764,23 +871,16 @@ async function mouseAction(tabId: number, command: 'HOVER' | 'CLICK', selector: 
 async function typeText(tabId: number, text: string): Promise<void> {
   const target = { tabId };
   await ensureDebuggerAttached(tabId);
-  for (const char of text) {
-    await withCallback<void>((cb) => 
-      chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
-        type: 'keyDown',
-        text: char,
-        unmodifiedText: char,
-      }, cb)
-    );
-    await withCallback<void>((cb) => 
-      chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
-        type: 'keyUp',
-        text: char,
-        unmodifiedText: char,
-      }, cb)
-    );
-    await delay(20);
-  }
+  // Use Input.insertText for reliable text input (bypasses key event issues)
+  await new Promise<void>((resolve, reject) => {
+    chrome.debugger.sendCommand(target, 'Input.insertText', { text }, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 async function pressKey(tabId: number, key: string): Promise<void> {
@@ -950,18 +1050,317 @@ async function handleCommand(message: McpCommand): Promise<unknown> {
 
     case 'SMART_FOCUS': {
       if (!connectedTabId) throw new Error('No tab connected.');
-      const { target: targetText } = args as { target: string };
+      const { target: focusTarget } = args as { target: string };
       try {
-        const result = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: targetText })) as {
+        const result = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: focusTarget })) as {
           elementRef: string;
           tagName: string;
           text: string;
         };
-        // Return format: e165 a "why custody..."
         return `${result.elementRef} ${result.tagName} "${result.text.replace(/"/g, '\\"')}"`;
       } catch (error) {
         return 'Not found';
       }
+    }
+
+    case 'SMART_CLICK': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: clickTarget } = args as { target: string };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: clickTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      await mouseAction(connectedTabId, 'CLICK', '', focusResult.elementRef);
+      return { clicked: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"` };
+    }
+
+    case 'SMART_TYPE': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: typeTarget, text: typeStr } = args as { target: string; text: string };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: typeTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      await mouseAction(connectedTabId, 'CLICK', '', focusResult.elementRef);
+      await delay(100);
+      await typeText(connectedTabId, typeStr);
+      return { typed: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"`, text: typeStr };
+    }
+
+    case 'SMART_FILL': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: fillTarget, value: fillValue } = args as { target: string; value: string };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: fillTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      await sendContentCommand(connectedTabId, 'FILL', { selector: '', elementRef: focusResult.elementRef, value: fillValue });
+      return { filled: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"`, value: fillValue };
+    }
+
+    case 'SMART_HOVER': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: hoverTarget } = args as { target: string };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: hoverTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      await mouseAction(connectedTabId, 'HOVER', '', focusResult.elementRef);
+      return { hovered: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"` };
+    }
+
+    case 'SMART_SELECT_OPTION': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: selectTarget, options } = args as { target: string; options: string[] };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: selectTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      const result = await sendContentCommand(connectedTabId, 'SELECT', { selector: '', elementRef: focusResult.elementRef, options });
+      return { selected: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"`, options };
+    }
+
+    case 'SMART_CHECK': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: checkTarget } = args as { target: string };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: checkTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      const result = await sendContentCommand(connectedTabId, 'CHECK', { selector: '', elementRef: focusResult.elementRef });
+      return { checked: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"` };
+    }
+
+    case 'SMART_UNCHECK': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      const { target: uncheckTarget } = args as { target: string };
+      const focusResult = (await sendContentCommand(connectedTabId, 'SMART_FOCUS', { target: uncheckTarget })) as {
+        elementRef: string;
+        tagName: string;
+        text: string;
+      };
+      const result = await sendContentCommand(connectedTabId, 'UNCHECK', { selector: '', elementRef: focusResult.elementRef });
+      return { unchecked: true, target: `${focusResult.elementRef} ${focusResult.tagName} "${focusResult.text.replace(/"/g, '\\"')}"` };
+    }
+
+    case 'START_OBSERVE': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      observeBuffer = [];
+      observeActive = true;
+      await ensureDebuggerAttached(connectedTabId);
+      try {
+        await withCallback<void>((cb) => chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Runtime.enable', {}, cb));
+        await withCallback<void>((cb) => chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Network.enable', {}, cb));
+        await withCallback<void>((cb) => chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Log.enable', {}, cb));
+      } catch (e) {
+        // Some domains may not be available in all contexts
+      }
+      return { observing: true, message: 'Started capturing console errors, JS exceptions, and network errors' };
+    }
+
+    case 'STOP_OBSERVE': {
+      observeActive = false;
+      const stopEvents = [...observeBuffer];
+      try {
+        if (connectedTabId) {
+          await withCallback<void>((cb) => chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Network.disable', {}, cb)).catch(() => {});
+          await withCallback<void>((cb) => chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Runtime.disable', {}, cb)).catch(() => {});
+          await withCallback<void>((cb) => chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Log.disable', {}, cb)).catch(() => {});
+        }
+      } catch {
+        // Best effort
+      }
+      observeBuffer = [];
+      return { events: stopEvents };
+    }
+
+    case 'FLUSH_OBSERVE': {
+      const flushEvents = [...observeBuffer];
+      observeBuffer = [];
+      return { events: flushEvents };
+    }
+
+    case 'SCREENSHOT_STEP': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      await ensureDebuggerAttached(connectedTabId);
+      try {
+        const result = await withCallback<{ data: string }>((cb) =>
+          chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Page.captureScreenshot', { format: 'png' }, cb)
+        );
+        return { screenshot: result.data };
+      } catch (e) {
+        return { error: `Screenshot failed: ${(e as Error).message}` };
+      }
+    }
+
+    case 'START_RECORDING': {
+      if (!connectedTabId) throw new Error('No tab connected.');
+      recordingFrames = [];
+      recordingActive = true;
+      offscreenFrameQueue = [];
+
+      // Create offscreen document for MediaRecorder
+      try {
+        await chrome.offscreen.createDocument({
+          url: chrome.runtime.getURL('offscreen.html'),
+          reasons: ['USER_MEDIA' as any],
+          justification: 'Recording workflow as video',
+        });
+        offscreenDocumentReady = true;
+        // Small delay to let offscreen document initialize
+        await new Promise(r => setTimeout(r, 100));
+      } catch (e: any) {
+        // Document may already exist
+        if (!e.message?.includes('Only a single offscreen')) {
+          console.error('Failed to create offscreen document:', e);
+        }
+        offscreenDocumentReady = true;
+      }
+
+      // Start MediaRecorder in offscreen document
+      try {
+        await chrome.runtime.sendMessage({ type: 'OFFSCREEN_START_RECORDING' });
+      } catch { /* best-effort */ }
+
+      await ensureDebuggerAttached(connectedTabId);
+      // Start screencast at ~10fps for video
+      try {
+        await withCallback<void>((cb) =>
+          chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Page.startScreencast', { format: 'png', quality: 80, maxWidth: 1280, maxHeight: 720 }, cb)
+        );
+      } catch {
+        // Screencast not available in all contexts
+      }
+      return { recording: true };
+    }
+
+    case 'STOP_RECORDING': {
+      recordingActive = false;
+
+      // Stop screencast
+      try {
+        if (connectedTabId) {
+          await withCallback<void>((cb) =>
+            chrome.debugger.sendCommand({ tabId: connectedTabId }, 'Page.stopScreencast', {}, cb)
+          ).catch(() => {});
+        }
+      } catch { /* best-effort */ }
+
+      // Stop MediaRecorder in offscreen document and get webm
+      let webmBase64 = '';
+      if (offscreenDocumentReady) {
+        try {
+          const response = await chrome.runtime.sendMessage({ type: 'OFFSCREEN_STOP_RECORDING' });
+          if (response?.webm) {
+            webmBase64 = response.webm;
+          }
+        } catch { /* best-effort */ }
+
+        // Close offscreen document
+        try {
+          await chrome.offscreen.closeDocument();
+        } catch { /* best-effort */ }
+        offscreenDocumentReady = false;
+      }
+
+      // If we got a webm, return it; otherwise fall back to frames
+      if (webmBase64) {
+        recordingFrames = [];
+        return { webm: webmBase64 };
+      }
+
+      // Fallback: return raw frames if MediaRecorder failed
+      const frames = [...recordingFrames];
+      recordingFrames = [];
+      return { frames };
+    }
+
+    case 'GET_WORKFLOW_SETTINGS': {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(
+          { smartwriterWorkflowScreenshot: true, smartwriterWorkflowRecording: true },
+          (res) => {
+            resolve({
+              screenshot: res.smartwriterWorkflowScreenshot,
+              recording: res.smartwriterWorkflowRecording,
+            });
+          }
+        );
+      });
+    }
+
+    case 'START_REPORT_SERVER': {
+      const port = (args as { port?: number }).port;
+      const startPort = (args as { startPort?: number }).startPort || 8889;
+      let ws: WebSocket | null = null;
+      const st = port ? connMap.get(port) : undefined;
+      if (st?.ws && st.ws.readyState === WebSocket.OPEN) {
+        ws = st.ws;
+      } else {
+        for (const [, s] of connMap) {
+          if (s.ws && s.ws.readyState === WebSocket.OPEN) { ws = s.ws; break; }
+        }
+      }
+      if (!ws) return { error: 'Not connected to MCP server' };
+      const requestId = Math.random().toString(36).substring(2);
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve({ error: 'Timeout' }), 15000);
+        const handler = (event: MessageEvent) => {
+          try {
+            const msg = JSON.parse(event.data as string);
+            if (msg.requestId === requestId) {
+              clearTimeout(timeout);
+              ws!.removeEventListener('message', handler);
+              resolve(msg.result || { error: msg.error || 'Unknown error' });
+            }
+          } catch { /* ignore */ }
+        };
+        ws!.addEventListener('message', handler);
+        ws!.send(JSON.stringify({
+          type: 'START_REPORT_SERVER',
+          requestId,
+          startPort,
+        }));
+      });
+    }
+
+    case 'STOP_REPORT_SERVER': {
+      const port = (args as { port?: number }).port;
+      let ws: WebSocket | null = null;
+      const st = port ? connMap.get(port) : undefined;
+      if (st?.ws && st.ws.readyState === WebSocket.OPEN) {
+        ws = st.ws;
+      } else {
+        for (const [, s] of connMap) {
+          if (s.ws && s.ws.readyState === WebSocket.OPEN) { ws = s.ws; break; }
+        }
+      }
+      if (!ws) return { error: 'Not connected to MCP server' };
+      const requestId = Math.random().toString(36).substring(2);
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve({ error: 'Timeout' }), 10000);
+        const handler = (event: MessageEvent) => {
+          try {
+            const msg = JSON.parse(event.data as string);
+            if (msg.requestId === requestId) {
+              clearTimeout(timeout);
+              ws!.removeEventListener('message', handler);
+              resolve(msg.result || { error: msg.error || 'Unknown error' });
+            }
+          } catch { /* ignore */ }
+        };
+        ws!.addEventListener('message', handler);
+        ws!.send(JSON.stringify({
+          type: 'STOP_REPORT_SERVER',
+          requestId,
+        }));
+      });
     }
 
     case 'SMART_SEARCH': {
@@ -1251,6 +1650,10 @@ ${finalScript}`;
       await chrome.tabs.update(connectedTabId, { active: true });
       return { success: true, connectedTabId };
 
+    case 'ASSERT':
+      if (!connectedTabId) throw new Error('No tab connected.');
+      return sendContentCommand(connectedTabId, 'ASSERT', args);
+
     default:
       if (connectedTabId && TARGET_RESOLUTION_COMMANDS.has(command) && typeof args.selector === 'string') {
         const selector = args.selector;
@@ -1428,6 +1831,74 @@ async function onMessageHandler(request: any, _sender: chrome.runtime.MessageSen
 
     case 'COMMAND': {
       return await handleCommand(request as unknown as McpCommand);
+    }
+
+    case 'START_REPORT_SERVER': {
+      const port = (request as { port?: number }).port;
+      const startPort = (request as { startPort?: number }).startPort || 8889;
+      let ws: WebSocket | null = null;
+      const state = port ? connMap.get(port) : undefined;
+      if (state?.ws && state.ws.readyState === WebSocket.OPEN) {
+        ws = state.ws;
+      } else {
+        for (const [, s] of connMap) {
+          if (s.ws && s.ws.readyState === WebSocket.OPEN) { ws = s.ws; break; }
+        }
+      }
+      if (!ws) return { error: 'Not connected to MCP server' };
+      const requestId = Math.random().toString(36).substring(2);
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve({ error: 'Timeout' }), 15000);
+        const handler = (event: MessageEvent) => {
+          try {
+            const msg = JSON.parse(event.data as string);
+            if (msg.requestId === requestId) {
+              clearTimeout(timeout);
+              ws!.removeEventListener('message', handler);
+              resolve(msg.result || { error: msg.error || 'Unknown error' });
+            }
+          } catch { /* ignore */ }
+        };
+        ws!.addEventListener('message', handler);
+        ws!.send(JSON.stringify({
+          type: 'START_REPORT_SERVER',
+          requestId,
+          startPort,
+        }));
+      });
+    }
+
+    case 'STOP_REPORT_SERVER': {
+      const port = (request as { port?: number }).port;
+      let ws: WebSocket | null = null;
+      const state = port ? connMap.get(port) : undefined;
+      if (state?.ws && state.ws.readyState === WebSocket.OPEN) {
+        ws = state.ws;
+      } else {
+        for (const [, s] of connMap) {
+          if (s.ws && s.ws.readyState === WebSocket.OPEN) { ws = s.ws; break; }
+        }
+      }
+      if (!ws) return { error: 'Not connected to MCP server' };
+      const requestId = Math.random().toString(36).substring(2);
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve({ error: 'Timeout' }), 10000);
+        const handler = (event: MessageEvent) => {
+          try {
+            const msg = JSON.parse(event.data as string);
+            if (msg.requestId === requestId) {
+              clearTimeout(timeout);
+              ws!.removeEventListener('message', handler);
+              resolve(msg.result || { error: msg.error || 'Unknown error' });
+            }
+          } catch { /* ignore */ }
+        };
+        ws!.addEventListener('message', handler);
+        ws!.send(JSON.stringify({
+          type: 'STOP_REPORT_SERVER',
+          requestId,
+        }));
+      });
     }
 
     default:

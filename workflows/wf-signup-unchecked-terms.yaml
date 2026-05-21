@@ -1,0 +1,21 @@
+name: Signup - Unchecked Terms
+description: Verify that submitting without agreeing to terms shows "must agree" error and prevents form submission
+group: Signup/Fail
+stopOnFail: false
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - smart_fill:
+      target: Enter your full name
+      value: Test User
+  - smart_fill:
+      target: Enter your email
+      value: terms@test.com
+  - smart_type:
+      target: Min 6 characters
+      text: secret123
+  - click:
+      selector: '#submit-btn'
+  - expect:
+      visible: "must agree"
+      not_visible: "Submitted"

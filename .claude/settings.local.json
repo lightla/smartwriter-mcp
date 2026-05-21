@@ -7,7 +7,20 @@
       "Bash(cmd /c \"wsl /home/light/.nvm/versions/node/v22.22.2/bin/node /home/light/workspace/ai/smartwriter-mcp/dist/index.js --auto-port\")",
       "Bash(cmd /c \"wsl /home/light/.nvm/versions/node/v22.22.2/bin/node --version\")",
       "Bash(powershell.exe -Command \"& wsl /home/light/.nvm/versions/node/v22.22.2/bin/node --version\")",
-      "Bash(powershell.exe -Command 'Get-ChildItem $env:LOCALAPPDATA | Where-Object { $_.Name -like '\\\\''*claude*'\\\\'' -or $_.Name -like '\\\\''*Claude*'\\\\'' -or $_.Name -like '\\\\''*Anthropic*'\\\\'' }')"
+      "Bash(powershell.exe -Command 'Get-ChildItem $env:LOCALAPPDATA | Where-Object { $_.Name -like '\\\\''*claude*'\\\\'' -or $_.Name -like '\\\\''*Claude*'\\\\'' -or $_.Name -like '\\\\''*Anthropic*'\\\\'' }')",
+      "Bash(rtk curl *)",
+      "Bash(rtk ls *)",
+      "Bash(rtk read *)",
+      "Bash(python3 -m json.tool)",
+      "mcp__icm__icm_memory_recall",
+      "WebFetch(domain:localhost)",
+      "Bash(netstat -tlnp)",
+      "mcp__smartwriter__cli_server_info",
+      "Bash(rtk grep *)",
+      "Bash(python3 *)",
+      "Bash(nohup node /home/light/workspace/ai/smartwriter-mcp/dist/index.js)",
+      "Bash(echo \"Started PID: $!\")",
+      "Read(//tmp/**)"
     ]
   }
 }

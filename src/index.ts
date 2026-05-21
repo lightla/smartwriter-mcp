@@ -4,10 +4,13 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer, WebSocket } from 'ws';
+import http from 'http';
 import net from 'net';
-import { execSync, execFileSync } from 'child_process';
+import { execSync, execFileSync, spawn, ChildProcess } from 'child_process';
 import { realpathSync, existsSync, statSync, readFileSync } from 'fs';
 import path from 'path';
+import os from 'os';
+import { runWorkflow, formatReport, deleteWorkflowResult, deleteWorkflowGroup, deleteWorkflowSession } from './workflow.js';
 
 const DEFAULT_PORT = 9223;
 
@@ -66,6 +69,7 @@ function fastSearch(term: string, searchPath: string): string[] {
 type CliOptions = {
   port?: number;
   autoFreePort: boolean;
+  reportOnly: boolean;
 };
 
 function parsePort(value: string, source: string): number {
@@ -77,13 +81,15 @@ function parsePort(value: string, source: string): number {
 }
 
 function getCliOptions(): CliOptions {
-  const options: CliOptions = { autoFreePort: false };
+  const options: CliOptions = { autoFreePort: false, reportOnly: false };
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' || args[i] === '-p') {
       options.port = parsePort(args[++i], 'CLI');
     } else if (args[i] === '--auto-free-port' || args[i] === '--auto-port') {
       options.autoFreePort = true;
+    } else if (args[i] === '--report-only') {
+      options.reportOnly = true;
     }
   }
   return options;
@@ -184,7 +190,27 @@ const COMMAND_MAP: Record<string, string> = {
   find_element_by_text: 'FIND_ELEMENT_BY_TEXT',
   smart_search: 'SMART_SEARCH',
   smart_focus: 'SMART_FOCUS',
+  smart_click: 'SMART_CLICK',
+  smart_type: 'SMART_TYPE',
+  smart_fill: 'SMART_FILL',
+  smart_hover: 'SMART_HOVER',
+  smart_select_option: 'SMART_SELECT_OPTION',
+  smart_check: 'SMART_CHECK',
+  smart_uncheck: 'SMART_UNCHECK',
   press_enter: 'PRESS_ENTER',
+  run_workflow: 'RUN_WORKFLOW',
+  start_observe: 'START_OBSERVE',
+  stop_observe: 'STOP_OBSERVE',
+  flush_observe: 'FLUSH_OBSERVE',
+  screenshot_step: 'SCREENSHOT_STEP',
+  start_recording: 'START_RECORDING',
+  stop_recording: 'STOP_RECORDING',
+  get_workflow_settings: 'GET_WORKFLOW_SETTINGS',
+  assert_url: 'ASSERT',
+  assert_visible: 'ASSERT',
+  assert_not_visible: 'ASSERT',
+  assert_element: 'ASSERT',
+  assert_not_element: 'ASSERT',
   };
 
   const TOOLS = [
@@ -200,6 +226,86 @@ const COMMAND_MAP: Record<string, string> = {
       type: 'object' as const,
       properties: {
         target: { type: 'string', description: 'The text or selector of the element to focus' },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'smart_click',
+    description: 'Find an element by text or selector and click it. Combines smart_focus + click in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the element to click' },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'smart_type',
+    description: 'Find an element by text or selector, focus it, and type text into it char by char. Combines smart_focus + click + type in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the input element' },
+        text: { type: 'string', description: 'The text to type char by char' },
+      },
+      required: ['target', 'text'],
+    },
+  },
+  {
+    name: 'smart_fill',
+    description: 'Find an element by text or selector and fill it with a value instantly. Combines smart_focus + fill in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the input element' },
+        value: { type: 'string', description: 'The value to fill in' },
+      },
+      required: ['target', 'value'],
+    },
+  },
+  {
+    name: 'smart_hover',
+    description: 'Find an element by text or selector and hover over it. Combines smart_focus + hover in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the element to hover over' },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'smart_select_option',
+    description: 'Find a select element by text or selector and select an option. Combines smart_focus + select_option in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the select element' },
+        options: { type: 'array', items: { type: 'string' }, description: 'List of option values to select; first value will be used' },
+      },
+      required: ['target', 'options'],
+    },
+  },
+  {
+    name: 'smart_check',
+    description: 'Find a checkbox or radio input by text or selector and check it. Combines smart_focus + check in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the checkbox or radio element' },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'smart_uncheck',
+    description: 'Find a checkbox input by text or selector and uncheck it. Combines smart_focus + uncheck in one step.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: { type: 'string', description: 'The text or selector of the checkbox element' },
       },
       required: ['target'],
     },
@@ -559,6 +665,156 @@ const COMMAND_MAP: Record<string, string> = {
     description: 'Clear all tracked annotations across flow tabs.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
+  {
+    name: 'assert_url',
+    description: 'Assert that the current page URL matches conditions. Use in workflow tests to verify navigation succeeded.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        equals: { type: 'string', description: 'URL must equal this value exactly' },
+        contains: { type: 'string', description: 'URL must contain this substring' },
+        starts_with: { type: 'string', description: 'URL must start with this prefix' },
+        matches: { type: 'string', description: 'URL must match this regex pattern' },
+      },
+    },
+  },
+  {
+    name: 'assert_visible',
+    description: 'Assert that specific text is visible on the current page. Use in workflow tests to verify validation messages, headings, etc.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        text: { type: 'string', description: 'Text that should be visible on the page (case-insensitive)' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'assert_not_visible',
+    description: 'Assert that specific text is NOT visible on the current page. Use to verify error messages are absent, etc.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        text: { type: 'string', description: 'Text that should NOT be visible on the page (case-insensitive)' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'assert_element',
+    description: 'Assert that a DOM element matching the CSS selector exists on the page.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        selector: { type: 'string', description: 'CSS selector that should match an element' },
+      },
+      required: ['selector'],
+    },
+  },
+  {
+    name: 'assert_not_element',
+    description: 'Assert that no DOM element matching the CSS selector exists on the page.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        selector: { type: 'string', description: 'CSS selector that should NOT match any element' },
+      },
+      required: ['selector'],
+    },
+  },
+  {
+    name: 'run_workflow',
+    description: 'Execute a workflow from a YAML file path or inline YAML. Runs all steps sequentially (navigate, smart_click, smart_type, etc.), captures errors, and returns a compact report. Results are saved as HTML report file.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'Path to YAML workflow file' },
+        yaml: { type: 'string', description: 'Inline YAML workflow definition' },
+        sessionId: { type: 'string', description: 'Optional session ID to group multiple workflow runs together' },
+      },
+    },
+  },
+  {
+    name: 'delete_workflow_result',
+    description: 'Delete a workflow result by its ID. Removes the result directory and its files.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'The result ID to delete' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_workflow_group',
+    description: 'Delete all workflow results in a group. Group is specified as path like "Signup/Fail".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        group: { type: 'string', description: 'Group path to delete (e.g. "Signup/Fail")' },
+      },
+      required: ['group'],
+    },
+  },
+  {
+    name: 'delete_workflow_session',
+    description: 'Delete all workflow results in a session.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID to delete' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'start_observe',
+    description: 'Start capturing browser console errors, JS exceptions, and network errors (HTTP 4xx/5xx). Call before running a workflow to capture issues.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'stop_observe',
+    description: 'Stop capturing and return all observed console errors, JS exceptions, and network errors since start_observe was called.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'flush_observe',
+    description: 'Return observed events since last flush without stopping observation. Use between workflow steps to capture per-step observations.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'screenshot_step',
+    description: 'Take a screenshot of the current page state. Returns base64 PNG data.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'start_recording',
+    description: 'Start screen recording using CDP screencast. Captures frames for later playback.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'stop_recording',
+    description: 'Stop screen recording and return captured frames.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'get_workflow_settings',
+    description: 'Get workflow settings from the extension (screenshot per step, recording enabled).',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'start_report_server',
+    description: 'Get the workflow dashboard URL. The MCP server always serves the dashboard on its own port — this returns it immediately. If a separate report server was spawned, returns that port instead.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'stop_report_server',
+    description: 'Stop the separate report server process if one was spawned. The dashboard remains available on the MCP server port.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
 ];
 
 function isScalarLike(value: unknown): value is string | number | boolean | bigint | null | undefined {
@@ -722,11 +978,105 @@ async function main() {
   const options = getCliOptions();
   const requestedPort = options.port || DEFAULT_PORT;
 
+  // Report-only mode: lightweight HTTP server for dashboard (no MCP, no WebSocket)
+  if (options.reportOnly) {
+    const WORKFLOWS_DIR = path.join(os.homedir(), '.smartwriter', 'workflows');
+    const MIME_TYPES: Record<string, string> = {
+      '.html': 'text/html; charset=utf-8',
+      '.css': 'text/css',
+      '.js': 'application/javascript',
+      '.json': 'application/json',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.webm': 'video/webm',
+      '.mp4': 'video/mp4',
+    };
+
+    const httpServer = http.createServer((req, res) => {
+      const urlPath = req.url?.split('?')[0] || '/';
+      let filePath: string;
+      if (urlPath === '/' || urlPath === '/index.html') {
+        filePath = path.join(WORKFLOWS_DIR, 'index.html');
+      } else {
+        filePath = path.join(WORKFLOWS_DIR, urlPath);
+      }
+      if (!filePath.startsWith(WORKFLOWS_DIR)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      if (!existsSync(filePath)) {
+        res.writeHead(404);
+        res.end('Not found');
+        return;
+      }
+      if (statSync(filePath).isDirectory()) {
+        const files = execSync(`ls -1 "${filePath}"`, { encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
+        const html = files.map(f => `<a href="${path.basename(f)}">${f}</a>`).join('\n');
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(html);
+        return;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      try {
+        const data = readFileSync(filePath);
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
+        res.end(data);
+      } catch {
+        res.writeHead(500);
+        res.end('Internal error');
+      }
+    });
+
+    let port = requestedPort;
+    if (options.autoFreePort) {
+      while (port <= 65535 && !(await isPortAvailable(port))) port++;
+      if (port > 65535) {
+        process.stderr.write('[Smartwriter Report] No available port\n');
+        process.exit(1);
+      }
+    }
+
+    async function isPortAvailable(p: number): Promise<boolean> {
+      return new Promise((resolve) => {
+        const s = net.createServer();
+        s.once('error', () => resolve(false));
+        s.once('listening', () => { s.close(); resolve(true); });
+        s.listen(p, '127.0.0.1');
+      });
+    }
+
+    httpServer.listen(port, '127.0.0.1', () => {
+      // Output port so parent process can read it
+      process.stdout.write(`REPORT_PORT:${port}\n`);
+      process.stderr.write(`[Smartwriter Report] Dashboard serving on http://localhost:${port}/\n`);
+    });
+    return; // No MCP server, no WebSocket — just HTTP
+  }
+
   let extensionWs: WebSocket | null = null;
   const pendingRequests = new Map<
     string,
     { resolve: (value: unknown) => void; reject: (reason?: any) => void; timeout: NodeJS.Timeout }
   >();
+
+  // Report server child process management
+  let reportServerProcess: ChildProcess | null = null;
+  let reportServerPort: number | null = null;
+
+  function killReportServer() {
+    if (reportServerProcess) {
+      try { reportServerProcess.kill('SIGTERM'); } catch { /* already dead */ }
+      reportServerProcess = null;
+      reportServerPort = null;
+    }
+  }
+
+  // Kill report server on exit
+  process.on('SIGINT', () => { killReportServer(); process.exit(0); });
+  process.on('SIGTERM', () => { killReportServer(); process.exit(0); });
+  process.on('exit', () => { killReportServer(); });
 
   async function sendToExtension(command: string, args: Record<string, unknown>): Promise<unknown> {
     if (!extensionWs || extensionWs.readyState !== WebSocket.OPEN) {
@@ -765,18 +1115,235 @@ async function main() {
     }
   }
 
-  const wss = new WebSocketServer({ port });
-  process.stderr.write(`[Smartwriter MCP] WebSocket server started on ws://localhost:${port}\n`);
+  // HTTP server for dashboard + WebSocket upgrade
+  const WORKFLOWS_DIR = path.join(os.homedir(), '.smartwriter', 'workflows');
+  const MIME_TYPES: Record<string, string> = {
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.webm': 'video/webm',
+    '.mp4': 'video/mp4',
+  };
+
+  const httpServer = http.createServer((req, res) => {
+    const urlPath = req.url?.split('?')[0] || '/';
+
+    // API endpoints for delete operations
+    if (req.method === 'DELETE' && urlPath.startsWith('/api/')) {
+      const importWorkflow = async () => {
+        const { deleteWorkflowResult, deleteWorkflowGroup, deleteWorkflowSession } = await import('./workflow.js');
+        return { deleteWorkflowResult, deleteWorkflowGroup, deleteWorkflowSession };
+      };
+
+      if (urlPath.startsWith('/api/result/')) {
+        const id = decodeURIComponent(urlPath.slice('/api/result/'.length));
+        importWorkflow().then(({ deleteWorkflowResult }) => {
+          const deleted = deleteWorkflowResult(id);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ deleted, id }));
+        }).catch(() => { res.writeHead(500); res.end('Error'); });
+        return;
+      }
+      if (urlPath.startsWith('/api/group/')) {
+        const group = decodeURIComponent(urlPath.slice('/api/group/'.length));
+        const groupPath = group.split('/').map(s => s.trim()).filter(Boolean);
+        importWorkflow().then(({ deleteWorkflowGroup }) => {
+          const count = deleteWorkflowGroup(groupPath);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ deleted: count, group }));
+        }).catch(() => { res.writeHead(500); res.end('Error'); });
+        return;
+      }
+      if (urlPath.startsWith('/api/session/')) {
+        const sessionId = decodeURIComponent(urlPath.slice('/api/session/'.length));
+        importWorkflow().then(({ deleteWorkflowSession }) => {
+          const count = deleteWorkflowSession(sessionId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ deleted: count, sessionId }));
+        }).catch(() => { res.writeHead(500); res.end('Error'); });
+        return;
+      }
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    // Rebuild dashboard on demand
+    if (req.method === 'POST' && urlPath === '/api/rebuild') {
+      try {
+        const scriptPath = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs');
+        execSync('node "' + scriptPath + '"', { encoding: 'utf-8', timeout: 10000 });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch (e) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
+      return;
+    }
+
+    let filePath: string;
+    if (urlPath === '/' || urlPath === '/index.html') {
+      filePath = path.join(WORKFLOWS_DIR, 'index.html');
+    } else {
+      filePath = path.join(WORKFLOWS_DIR, urlPath);
+    }
+    // Prevent path traversal
+    if (!filePath.startsWith(WORKFLOWS_DIR)) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+    if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+      // Serve directory listing as JSON for frames/ (for recording playback)
+      if (existsSync(filePath) && statSync(filePath).isDirectory()) {
+        const files = execSync(`ls -1 "${filePath}"`, { encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
+        const html = files.map(f => `<a href="${path.basename(f)}">${f}</a>`).join('\n');
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(html);
+        return;
+      }
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    try {
+      const data = readFileSync(filePath);
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
+      res.end(data);
+    } catch {
+      res.writeHead(500);
+      res.end('Internal error');
+    }
+  });
+
+  const wss = new WebSocketServer({ server: httpServer });
+
+  httpServer.listen(port, '127.0.0.1', () => {
+    process.stderr.write(`[Smartwriter MCP] HTTP+WS server started on http://localhost:${port}\n`);
+    process.stderr.write(`[Smartwriter MCP] Dashboard: http://localhost:${port}/\n`);
+  });
+
+  const EXTENSION_TYPES = new Set([
+    'TABS_UPDATE', 'HANDSHAKE', 'START_REPORT_SERVER', 'STOP_REPORT_SERVER',
+    'START_RECORDING', 'STOP_RECORDING', 'START_OBSERVE', 'STOP_OBSERVE',
+    'GET_WORKFLOW_SETTINGS', 'TOGGLE_TRACKING', 'TAB_FLOW_STATE_CHANGE',
+  ]);
 
   wss.on('connection', (ws) => {
-    process.stderr.write('[Smartwriter MCP] Chrome extension connected!\n');
-    if (extensionWs) extensionWs.close();
-    extensionWs = ws;
+    // Identify connection type by first message:
+    // Extension sends { type: "TABS_UPDATE" | "HANDSHAKE" | ... }
+    // Other WS clients send different types (e.g. { type: "RUN_WORKFLOW" })
+    let identified = false;
 
-    ws.on('message', (data) => {
+    const identify = (data: Buffer) => {
+      if (identified) return;
+      identified = true;
+      try {
+        const parsed = JSON.parse(data.toString());
+        const isExtension = EXTENSION_TYPES.has(parsed.type);
+        if (isExtension) {
+          process.stderr.write('[Smartwriter MCP] Chrome extension connected!\n');
+          if (extensionWs && extensionWs !== ws && extensionWs.readyState === WebSocket.OPEN) extensionWs.close();
+          extensionWs = ws;
+          ws.on('message', (d: Buffer) => extensionMessageHandler(d, ws));
+          ws.on('close', () => {
+            process.stderr.write('[Smartwriter MCP] Chrome extension disconnected. Waiting for reconnect...\n');
+            if (extensionWs === ws) extensionWs = null;
+            for (const [id, pending] of pendingRequests) {
+              clearTimeout(pending.timeout);
+              pending.reject(new Error('Extension disconnected'));
+              pendingRequests.delete(id);
+            }
+          });
+          extensionMessageHandler(data, ws);
+        } else if (parsed.type === 'RUN_WORKFLOW') {
+          // Allow WS clients to trigger workflow runs
+          process.stderr.write('[Smartwriter MCP] WS client requested RUN_WORKFLOW\n');
+          ws.on('message', async (d: Buffer) => {
+            try {
+              const msg = JSON.parse(d.toString());
+              if (msg.type !== 'RUN_WORKFLOW') return;
+              const result = await runWorkflow(
+                { path: msg.path, yaml: msg.yaml, sessionId: msg.sessionId },
+                (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs)
+              );
+              const report = formatReport(result);
+              ws.send(JSON.stringify({ type: 'WORKFLOW_RESULT', result, report }));
+            } catch (e) {
+              ws.send(JSON.stringify({ type: 'WORKFLOW_ERROR', error: e instanceof Error ? e.message : String(e) }));
+            }
+          });
+          // Process the first message too
+          (async () => {
+            try {
+              const result = await runWorkflow(
+                { path: parsed.path, yaml: parsed.yaml, sessionId: parsed.sessionId },
+                (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs)
+              );
+              const report = formatReport(result);
+              ws.send(JSON.stringify({ type: 'WORKFLOW_RESULT', result, report }));
+            } catch (e) {
+              ws.send(JSON.stringify({ type: 'WORKFLOW_ERROR', error: e instanceof Error ? e.message : String(e) }));
+            }
+          })();
+        } else {
+          process.stderr.write('[Smartwriter MCP] Non-extension WS client connected (type=' + (parsed.type || 'unknown') + '), ignoring\n');
+        }
+      } catch {
+        process.stderr.write('[Smartwriter MCP] Unknown client, ignoring\n');
+      }
+    };
+
+    ws.once('message', identify);
+  });
+
+  function extensionMessageHandler(data: Buffer, senderWs?: WebSocket) {
+    const ws = senderWs || extensionWs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'TABS_UPDATE') return;
+
+        // Handle extension-initiated commands (START/STOP_REPORT_SERVER)
+        if (msg.type === 'START_REPORT_SERVER') {
+          // MCP server always serves the dashboard on its own port
+          // If a separate report server was spawned, prefer that port
+          const serverPort = reportServerPort || port;
+          ws.send(JSON.stringify({ requestId: msg.requestId, result: { url: `http://localhost:${serverPort}/`, port: serverPort, status: reportServerPort ? 'already_running' : 'running' } }));
+          return;
+        }
+
+        if (msg.type === 'STOP_REPORT_SERVER') {
+          // Kill separate report server child process if one was spawned
+          killReportServer();
+          ws.send(JSON.stringify({ requestId: msg.requestId, result: { status: 'stopped' } }));
+          return;
+        }
+
+        // Handle workflow delete commands from dashboard
+        if (msg.type === 'DELETE_RESULT') {
+          const deleted = deleteWorkflowResult(msg.id);
+          ws.send(JSON.stringify({ requestId: msg.requestId, result: { deleted, id: msg.id } }));
+          return;
+        }
+        if (msg.type === 'DELETE_GROUP') {
+          const groupPath = (msg.group || '').split('/').map((s: string) => s.trim()).filter(Boolean);
+          const count = deleteWorkflowGroup(groupPath);
+          ws.send(JSON.stringify({ requestId: msg.requestId, result: { deleted: count, group: msg.group } }));
+          return;
+        }
+        if (msg.type === 'DELETE_SESSION') {
+          const count = deleteWorkflowSession(msg.sessionId);
+          ws.send(JSON.stringify({ requestId: msg.requestId, result: { deleted: count, sessionId: msg.sessionId } }));
+          return;
+        }
+
         const pending = pendingRequests.get(msg.requestId);
         if (pending) {
           clearTimeout(pending.timeout);
@@ -788,18 +1355,7 @@ async function main() {
           }
         }
       } catch { /* ignore */ }
-    });
-
-    ws.on('close', () => {
-      process.stderr.write('[Smartwriter MCP] Chrome extension disconnected. Waiting for reconnect...\n');
-      if (extensionWs === ws) extensionWs = null;
-      for (const [id, pending] of pendingRequests) {
-        clearTimeout(pending.timeout);
-        pending.reject(new Error('Extension disconnected'));
-        pendingRequests.delete(id);
-      }
-    });
-  });
+  }
 
   const server = new Server(
     { name: 'smartwriter-mcp', version: '1.0.0' },
@@ -843,6 +1399,115 @@ async function main() {
         pids.forEach(p => { try { process.kill(p, 'SIGTERM'); } catch { /* ignore */ } });
         return textResponse({ killed: pids.length, pids: pids.join(', ') });
       } catch (e) { return errorResponse(e); }
+    }
+
+    // Report server management — spawn/kill child process
+    if (name === 'start_report_server') {
+      // MCP server always serves the dashboard on its own port
+      // If a separate report server was spawned, prefer that port
+      const serverPort = reportServerPort || port;
+      return textResponse({ url: `http://localhost:${serverPort}/`, port: serverPort, status: reportServerPort ? 'already_running' : 'running' });
+    }
+
+    if (name === 'stop_report_server') {
+      try {
+        if (!reportServerProcess) {
+          return textResponse({ status: 'not_running' });
+        }
+        // Kill separate report server child process if one was spawned
+        // Dashboard remains available on MCP server port
+        killReportServer();
+        return textResponse({ status: 'stopped', note: 'Dashboard remains available on MCP server port' });
+      } catch (e) { return errorResponse(e); }
+    }
+
+    // Assertion tools — build conditions and send ASSERT command
+    if (name === 'assert_url') {
+      const conditions: Record<string, string> = {};
+      if (args.equals) conditions.url = String(args.equals);
+      if (args.contains) conditions.url_contains = String(args.contains);
+      if (args.starts_with) conditions.url_starts_with = String(args.starts_with);
+      if (args.matches) conditions.url_matches = String(args.matches);
+      try {
+        const result = await sendToExtension('ASSERT', { conditions });
+        return textResponse(JSON.stringify(result, null, 2));
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+    if (name === 'assert_visible') {
+      try {
+        const result = await sendToExtension('ASSERT', { conditions: { visible: String(args.text) } });
+        return textResponse(JSON.stringify(result, null, 2));
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+    if (name === 'assert_not_visible') {
+      try {
+        const result = await sendToExtension('ASSERT', { conditions: { not_visible: String(args.text) } });
+        return textResponse(JSON.stringify(result, null, 2));
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+    if (name === 'assert_element') {
+      try {
+        const result = await sendToExtension('ASSERT', { conditions: { element: String(args.selector) } });
+        return textResponse(JSON.stringify(result, null, 2));
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+    if (name === 'assert_not_element') {
+      try {
+        const result = await sendToExtension('ASSERT', { conditions: { not_element: String(args.selector) } });
+        return textResponse(JSON.stringify(result, null, 2));
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+
+    // Workflow execution — runs locally, orchestrates extension commands
+    if (name === 'run_workflow') {
+      try {
+        const result = await runWorkflow(
+          { path: args.path as string | undefined, yaml: args.yaml as string | undefined, sessionId: args.sessionId as string | undefined },
+          (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs)
+        );
+        const report = formatReport(result);
+        return textResponse(report);
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+
+    if (name === 'delete_workflow_result') {
+      try {
+        const deleted = deleteWorkflowResult(args.id as string);
+        return textResponse(deleted ? `Deleted result ${args.id}` : `Result ${args.id} not found`);
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+
+    if (name === 'delete_workflow_group') {
+      try {
+        const groupPath = (args.group as string).split('/').map((s: string) => s.trim()).filter(Boolean);
+        const count = deleteWorkflowGroup(groupPath);
+        return textResponse(`Deleted ${count} results in group ${args.group}`);
+      } catch (e) {
+        return errorResponse(e);
+      }
+    }
+
+    if (name === 'delete_workflow_session') {
+      try {
+        const count = deleteWorkflowSession(args.sessionId as string);
+        return textResponse(`Deleted ${count} results in session ${args.sessionId}`);
+      } catch (e) {
+        return errorResponse(e);
+      }
     }
 
     // Extension Command Mapping

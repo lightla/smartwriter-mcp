@@ -8,6 +8,8 @@ import {
   Wifi,
   WifiOff,
   Activity,
+  ClipboardList,
+  Monitor,
 } from 'lucide-react';
 
 import { Button } from './components/ui/button';
@@ -254,11 +256,18 @@ function SettingsPanel({
   const [name, setName] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [tabFlow, setTabFlow] = React.useState(false);
+  const [screenshotEnabled, setScreenshotEnabled] = React.useState(true);
+  const [recordingEnabled, setRecordingEnabled] = React.useState(true);
 
   React.useEffect(() => {
-    chrome.storage.local.get('smartwriterTabFlow', (res) => {
-      setTabFlow(!!res.smartwriterTabFlow);
-    });
+    chrome.storage.local.get(
+      { smartwriterTabFlow: false, smartwriterWorkflowScreenshot: true, smartwriterWorkflowRecording: true },
+      (res) => {
+        setTabFlow(!!res.smartwriterTabFlow);
+        setScreenshotEnabled(res.smartwriterWorkflowScreenshot);
+        setRecordingEnabled(res.smartwriterWorkflowRecording);
+      }
+    );
   }, []);
 
   const toggleTabFlow = (val: boolean) => {
@@ -335,6 +344,40 @@ function SettingsPanel({
       </form>
 
       {error && <div className={cn('mt-2 text-xs', theme.textDanger)}>{error}</div>}
+
+      <div className={cn('mt-3 text-sm font-semibold', theme.textAccent)}>Workflow Settings</div>
+      <div className="space-y-2 mt-1">
+        <div className={cn('flex items-center justify-between p-2 rounded-lg', theme.cardBg, theme.cardBorder, 'border')}>
+          <div>
+            <div className={cn('text-sm font-medium', theme.text)}>Screenshot per step</div>
+            <div className={cn('text-[10px]', theme.textMuted)}>Capture screenshot after each step</div>
+          </div>
+          <button
+            onClick={() => { const next = !screenshotEnabled; setScreenshotEnabled(next); chrome.storage.local.set({ smartwriterWorkflowScreenshot: next }); }}
+            className={cn(
+              'w-10 h-5 rounded-full transition-all duration-300 relative',
+              screenshotEnabled ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.4)]' : 'bg-gray-700'
+            )}
+          >
+            <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 transform', screenshotEnabled ? 'translate-x-5' : 'translate-x-0.5')} />
+          </button>
+        </div>
+        <div className={cn('flex items-center justify-between p-2 rounded-lg', theme.cardBg, theme.cardBorder, 'border')}>
+          <div>
+            <div className={cn('text-sm font-medium', theme.text)}>Screen recording</div>
+            <div className={cn('text-[10px]', theme.textMuted)}>Record video during workflow execution</div>
+          </div>
+          <button
+            onClick={() => { const next = !recordingEnabled; setRecordingEnabled(next); chrome.storage.local.set({ smartwriterWorkflowRecording: next }); }}
+            className={cn(
+              'w-10 h-5 rounded-full transition-all duration-300 relative',
+              recordingEnabled ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.4)]' : 'bg-gray-700'
+            )}
+          >
+            <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 transform', recordingEnabled ? 'translate-x-5' : 'translate-x-0.5')} />
+          </button>
+        </div>
+      </div>
     </section>
   );
 }
@@ -426,6 +469,10 @@ function PopupApp() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [tabFlowEnabled, setTabFlowEnabled] = React.useState(false);
+  const [reportServerUrls, setReportServerUrls] = React.useState<Record<number, string>>({});
+  const [reportServerLoading, setReportServerLoading] = React.useState(false);
+  const [showReportDropdown, setShowReportDropdown] = React.useState(false);
+  const [individualLoading, setIndividualLoading] = React.useState<number | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -466,6 +513,69 @@ function PopupApp() {
     await chrome.storage.local.set({ smartwriterTabFlow: next });
     await chrome.runtime.sendMessage({ type: 'TAB_FLOW_CHANGED', enabled: next });
     await refresh();
+  };
+
+  const handleToggleReportServer = async () => {
+    const hasAnyUrl = Object.keys(reportServerUrls).length > 0;
+    if (hasAnyUrl) {
+      setReportServerLoading(true);
+      for (const mcpPort of Object.keys(reportServerUrls)) {
+        try {
+          await chrome.runtime.sendMessage({ type: 'STOP_REPORT_SERVER', port: Number(mcpPort) });
+        } catch { /* ignore */ }
+      }
+      setReportServerUrls({});
+      await chrome.storage.local.remove('smartwriterReportUrls');
+      setReportServerLoading(false);
+    } else {
+      setReportServerLoading(true);
+      const connectedServers = (status?.servers ?? []).filter(s => s.wsStatus === 'connected');
+      const newUrls: Record<number, string> = {};
+      for (const server of connectedServers) {
+        try {
+          const resp = await chrome.runtime.sendMessage({ type: 'START_REPORT_SERVER', port: server.port, startPort: 8889 });
+          if (resp?.url) {
+            newUrls[server.port] = resp.url;
+          }
+        } catch { /* ignore */ }
+      }
+      setReportServerUrls(newUrls);
+      await chrome.storage.local.set({ smartwriterReportUrls: newUrls });
+      setReportServerLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    chrome.storage.local.get('smartwriterReportUrls', (res) => {
+      if (res.smartwriterReportUrls) setReportServerUrls(res.smartwriterReportUrls as Record<number, string>);
+    });
+  }, []);
+
+  const handleToggleIndividualReportServer = async (mcpPort: number) => {
+    const hasUrl = mcpPort in reportServerUrls;
+    if (hasUrl) {
+      // Stop this individual server
+      setIndividualLoading(mcpPort);
+      try {
+        await chrome.runtime.sendMessage({ type: 'STOP_REPORT_SERVER', port: mcpPort });
+      } catch { /* ignore */ }
+      const newUrls = { ...reportServerUrls };
+      delete newUrls[mcpPort];
+      setReportServerUrls(newUrls);
+      await chrome.storage.local.set({ smartwriterReportUrls: newUrls });
+    } else {
+      // Start this individual server
+      setIndividualLoading(mcpPort);
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'START_REPORT_SERVER', port: mcpPort, startPort: 8889 });
+        if (resp?.url) {
+          const newUrls = { ...reportServerUrls, [mcpPort]: resp.url };
+          setReportServerUrls(newUrls);
+          await chrome.storage.local.set({ smartwriterReportUrls: newUrls });
+        }
+      } catch { /* ignore */ }
+    }
+    setIndividualLoading(null);
   };
 
   const setServers = React.useCallback(
@@ -529,16 +639,57 @@ function PopupApp() {
           <div className={theme.headerTitle}>Smartwriter MCP</div>
           <div className={theme.headerSub}>Browser bridge</div>
         </div>
-        <Button
-          aria-label="Settings"
-          className={cn('!bg-[#a9c5c0] !text-[#16312e] hover:!bg-[#7fa8a1] hover:!text-[#061918]')}
-          onClick={() => setSettingsOpen((open) => !open)}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <div className="relative">
+            <Button
+              aria-label="Workflows"
+              className={cn('!bg-[#a9c5c0] !text-[#16312e] hover:!bg-[#7fa8a1] hover:!text-[#061918]')}
+              onClick={() => {
+                const urlCount = Object.keys(reportServerUrls).length;
+                if (urlCount === 0) {
+                  chrome.tabs.create({ url: `http://localhost:${status?.servers?.[0]?.port || 9223}` });
+                } else if (urlCount === 1) {
+                  chrome.tabs.create({ url: Object.values(reportServerUrls)[0] });
+                } else {
+                  setShowReportDropdown(prev => !prev);
+                }
+              }}
+              size="icon"
+              type="button"
+              variant="ghost"
+              title="Workflow Reports"
+            >
+              <ClipboardList className="h-4 w-4" />
+            </Button>
+            {showReportDropdown && Object.keys(reportServerUrls).length > 1 && (
+              <div className="absolute right-0 top-full mt-1 bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl z-50 min-w-[220px]">
+                {Object.entries(reportServerUrls).map(([mcpPort, url]) => (
+                  <button
+                    key={mcpPort}
+                    className="w-full px-3 py-2 text-left text-xs hover:bg-[#334155] text-[#e2e8f0] flex items-center gap-2 first:rounded-t-lg last:rounded-b-lg"
+                    onClick={() => {
+                      chrome.tabs.create({ url });
+                      setShowReportDropdown(false);
+                    }}
+                  >
+                    <span className="text-indigo-400 font-mono">:{mcpPort}</span>
+                    <span className="truncate">{url.replace(/^https?:\/\//, '')}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Button
+            aria-label="Settings"
+            className={cn('!bg-[#a9c5c0] !text-[#16312e] hover:!bg-[#7fa8a1] hover:!text-[#061918]')}
+            onClick={() => setSettingsOpen((open) => !open)}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
@@ -578,6 +729,70 @@ function PopupApp() {
             servers={status.servers}
           />
         )}
+
+        <section className={cn('p-3 rounded-xl border', theme.cardBg, theme.cardBorder)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', Object.keys(reportServerUrls).length > 0 ? 'bg-indigo-500/20 text-indigo-400' : theme.iconMuted)}>
+                <Monitor size={20} />
+              </div>
+              <div className="min-w-0">
+                <div className={cn('text-sm font-bold', theme.text)}>Workflow Server</div>
+                <div className={cn('text-[10px] uppercase tracking-wider font-extrabold', Object.keys(reportServerUrls).length > 0 ? 'text-indigo-400' : theme.textMuted)}>
+                  {reportServerLoading ? 'Starting...' : Object.keys(reportServerUrls).length > 0 ? 'Running' : 'Stopped'}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleToggleReportServer}
+              disabled={reportServerLoading}
+              className={cn(
+                'w-12 h-6 rounded-full transition-all duration-300 relative shrink-0',
+                Object.keys(reportServerUrls).length > 0 ? 'bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.4)]' : 'bg-gray-700'
+              )}
+            >
+              <div
+                className={cn(
+                  'absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 transform',
+                  Object.keys(reportServerUrls).length > 0 ? 'translate-x-7' : 'translate-x-1'
+                )}
+              />
+            </button>
+          </div>
+          {(status?.servers ?? []).filter(s => s.wsStatus === 'connected').length > 0 && (
+            <div className="mt-2 space-y-1">
+              {(status?.servers ?? []).filter(s => s.wsStatus === 'connected').map(server => {
+                const hasUrl = String(server.port) in reportServerUrls;
+                const isLoading = individualLoading === server.port;
+                const url = reportServerUrls[String(server.port)];
+                return (
+                  <div key={server.port} className={cn('flex items-center justify-between rounded-lg px-2 py-1', hasUrl ? 'bg-indigo-500/10' : 'bg-gray-800/50')}>
+                    <div className="min-w-0 flex-1">
+                      <div className={cn('text-[10px] font-mono', hasUrl ? 'text-indigo-300' : theme.textMuted)}>
+                        :{server.port}{url ? ` → ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleToggleIndividualReportServer(server.port)}
+                      disabled={isLoading}
+                      className={cn(
+                        'w-8 h-4 rounded-full transition-all duration-200 relative shrink-0 ml-2',
+                        hasUrl ? 'bg-indigo-500' : 'bg-gray-600'
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-200 transform',
+                          hasUrl ? 'translate-x-4' : 'translate-x-0.5'
+                        )}
+                      />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {loadError ? (
           <div className={cn('bg-[#ddb8b2] px-3 py-3 text-sm', theme.textDanger)}>{loadError}</div>

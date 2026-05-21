@@ -1,0 +1,21 @@
+name: Login - Email Not Found
+description: Verify that logging in with an unregistered email shows "Email not found" error
+group: Login/Fail
+stopOnFail: false
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - click:
+      selector: 'a[onclick*="login"]'
+  - wait: 500
+  - smart_fill:
+      target: you@example.com
+      value: nonexistent@test.com
+  - smart_type:
+      target: Enter your password
+      text: password123
+  - click:
+      selector: 'button[onclick*="handleLogin"]'
+  - wait: 500
+  - expect:
+      visible: "Email not found"

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Smartwriter Validation Test</title>
+  <style>
+    body { font-family: system-ui; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+    input, select, button, textarea { display: block; width: 100%; margin: 8px 0 16px; padding: 8px; font-size: 14px; }
+    button { background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    label { font-weight: 600; display: block; margin-top: 12px; }
+    label .req { color: #ef4444; }
+    .field-error { color: #ef4444; font-size: 12px; margin: -12px 0 8px; display: none; }
+    .field-error.show { display: block; }
+    input.invalid { border: 2px solid #ef4444; }
+    #output { background: #f1f5f9; padding: 12px; border-radius: 4px; min-height: 60px; margin-top: 16px; }
+    .checkbox-group { display: flex; gap: 16px; align-items: center; margin: 8px 0 16px; }
+    .checkbox-group label { font-weight: normal; display: inline; }
+  </style>
+</head>
+<body>
+  <h1>Signup Form</h1>
+
+  <label for="fullname">Full Name <span class="req">*</span></label>
+  <input type="text" id="fullname" placeholder="Enter your full name" required>
+  <div class="field-error" id="fullname-error">Full name is required (min 2 characters)</div>
+
+  <label for="email">Email <span class="req">*</span></label>
+  <input type="email" id="email" placeholder="Enter your email" required>
+  <div class="field-error" id="email-error">Valid email is required</div>
+
+  <label for="password">Password <span class="req">*</span></label>
+  <input type="password" id="password" placeholder="Min 6 characters" required>
+  <div class="field-error" id="password-error">Password must be at least 6 characters</div>
+
+  <label for="phone">Phone</label>
+  <input type="tel" id="phone" placeholder="+84 xxx xxx xxx">
+
+  <label for="country">Country</label>
+  <select id="country">
+    <option value="">Select country</option>
+    <option value="vn">Vietnam</option>
+    <option value="us">United States</option>
+    <option value="jp">Japan</option>
+  </select>
+
+  <div class="checkbox-group">
+    <input type="checkbox" id="agree">
+    <label for="agree">I agree to the terms <span class="req">*</span></label>
+  </div>
+  <div class="field-error" id="agree-error">You must agree to the terms</div>
+
+  <div class="checkbox-group">
+    <input type="checkbox" id="newsletter" checked>
+    <label for="newsletter">Subscribe to newsletter</label>
+  </div>
+
+  <button id="submit-btn" onclick="handleSubmit()">Submit</button>
+  <button id="reset-btn" onclick="handleReset()" style="background:#64748b">Reset</button>
+
+  <div id="output">Fill in the form and submit</div>
+
+  <script>
+    function validateField(id, value, validator) {
+      const input = document.getElementById(id);
+      const error = document.getElementById(id + '-error');
+      const valid = validator(value);
+      if (!valid) {
+        input.classList.add('invalid');
+        if (error) error.classList.add('show');
+        console.error('Validation failed: ' + id + ' = "' + value + '"');
+        return false;
+      }
+      input.classList.remove('invalid');
+      if (error) error.classList.remove('show');
+      return true;
+    }
+
+    function handleSubmit() {
+      const fullname = document.getElementById('fullname').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const phone = document.getElementById('phone').value.trim();
+      const country = document.getElementById('country').value;
+      const agree = document.getElementById('agree').checked;
+      const output = document.getElementById('output');
+
+      let valid = true;
+      if (!validateField('fullname', fullname, v => v.length >= 2)) valid = false;
+      if (!validateField('email', email, v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))) valid = false;
+      if (!validateField('password', password, v => v.length >= 6)) valid = false;
+
+      if (!agree) {
+        document.getElementById('agree-error').classList.add('show');
+        console.error('Validation failed: terms not agreed');
+        valid = false;
+      } else {
+        document.getElementById('agree-error').classList.remove('show');
+      }
+
+      if (!valid) {
+        output.textContent = 'Please fix the errors above';
+        output.style.color = '#ef4444';
+        return;
+      }
+
+      output.innerHTML = '<strong>Submitted!</strong><br>Name: ' + fullname + '<br>Email: ' + email + '<br>Country: ' + country + '<br>Phone: ' + phone;
+      output.style.color = '#22c55e';
+      console.log('Form submitted successfully for: ' + email);
+    }
+
+    function handleReset() {
+      document.getElementById('fullname').value = '';
+      document.getElementById('email').value = '';
+      document.getElementById('password').value = '';
+      document.getElementById('phone').value = '';
+      document.getElementById('country').value = '';
+      document.getElementById('agree').checked = false;
+      document.getElementById('newsletter').checked = true;
+      document.querySelectorAll('.invalid').forEach(el => el.classList.remove('invalid'));
+      document.querySelectorAll('.field-error.show').forEach(el => el.classList.remove('show'));
+      document.getElementById('output').textContent = 'Fill in the form and submit';
+      document.getElementById('output').style.color = 'inherit';
+    }
+  </script>
+</body>
+</html>

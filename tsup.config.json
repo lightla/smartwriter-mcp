@@ -1,0 +1,5 @@
+{
+  "entry": ["src/index.ts"],
+  "format": ["esm"],
+  "noExternal": ["js-yaml"]
+}

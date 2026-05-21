@@ -1,0 +1,22 @@
+name: Signup - Full Valid Form
+description: Verify that a correctly filled signup form submits successfully and shows "Submitted!" confirmation
+group: Signup/Pass
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - smart_fill:
+      target: Enter your full name
+      value: Nguyen Van A
+  - smart_fill:
+      target: Enter your email
+      value: nguyenvana@test.com
+  - smart_type:
+      target: Min 6 characters
+      text: secret123
+  - smart_check: I agree to the terms
+  - click:
+      selector: '#submit-btn'
+  - wait: 1000
+  - expect:
+      visible: "Submitted"
+      not_visible: "Please fix"

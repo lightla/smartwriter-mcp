@@ -146,6 +146,62 @@ async function handleMessage(message: ContentMessage, sendResponse: (response: C
       case 'RESOLVE_TARGET':
         result = handleResolveTarget(message.target, message.force);
         break;
+      case 'ASSERT': {
+        const conditions = (message as any).conditions as Record<string, string>;
+        const results: Array<{ condition: string; passed: boolean; detail: string }> = [];
+        const url = window.location.href;
+        const bodyText = document.body?.innerText?.toLowerCase() || '';
+        for (const [key, value] of Object.entries(conditions)) {
+          switch (key) {
+            case 'url': {
+              const passed = url === value;
+              results.push({ condition: 'url', passed, detail: `URL is "${url}", expected "${value}"` });
+              break;
+            }
+            case 'url_contains': {
+              const passed = url.includes(value);
+              results.push({ condition: 'url_contains', passed, detail: `URL "${url}" ${passed ? 'contains' : 'does not contain'} "${value}"` });
+              break;
+            }
+            case 'url_starts_with': {
+              const passed = url.startsWith(value);
+              results.push({ condition: 'url_starts_with', passed, detail: `URL "${url}" ${passed ? 'starts with' : 'does not start with'} "${value}"` });
+              break;
+            }
+            case 'visible': {
+              const found = bodyText.includes(value.toLowerCase());
+              results.push({ condition: 'visible', passed: found, detail: `Text "${value}" ${found ? 'is' : 'is not'} visible on page` });
+              break;
+            }
+            case 'not_visible': {
+              const found = bodyText.includes(value.toLowerCase());
+              results.push({ condition: 'not_visible', passed: !found, detail: `Text "${value}" ${found ? 'is still' : 'is not'} visible (expected NOT visible)` });
+              break;
+            }
+            case 'element': {
+              const el = document.querySelector(value);
+              const exists = !!el;
+              results.push({ condition: 'element', passed: exists, detail: `Element "${value}" ${exists ? 'exists' : 'does not exist'}` });
+              break;
+            }
+            case 'not_element': {
+              const el = document.querySelector(value);
+              const exists = !!el;
+              results.push({ condition: 'not_element', passed: !exists, detail: `Element "${value}" ${exists ? 'still exists' : 'does not exist'} (expected NOT exist)` });
+              break;
+            }
+            default:
+              results.push({ condition: key, passed: false, detail: `Unknown condition: ${key}` });
+          }
+        }
+        const allPassed = results.every(r => r.passed);
+        if (!allPassed) {
+          const failures = results.filter(r => !r.passed).map(r => r.detail).join('; ');
+          throw new Error(`Assertion failed: ${failures}`);
+        }
+        result = { passed: true, results };
+        break;
+      }
       case 'RESOLVE_TAGGED_ELEMENTS':
         result = handleResolveTaggedElements(message.data);
         break;
@@ -368,7 +424,7 @@ async function handleSmartFocus(targetText: string): Promise<unknown> {
 
   // Pick the best match with priority: Header > Input > Button/Link > Smallest Container
   let bestEl: Element | null = null;
-  
+
   for (const m of matches) {
     const el = elementRefStore.get(m.elementRef);
     if (!el || !isElementVisible(el)) continue;
@@ -381,7 +437,7 @@ async function handleSmartFocus(targetText: string): Promise<unknown> {
     }
 
     const tag = el.tagName.toUpperCase();
-    
+
     // IF LABEL: find associated input
     if (tag === 'LABEL' && (el as HTMLLabelElement).control) {
       bestEl = (el as HTMLLabelElement).control!;
@@ -404,6 +460,42 @@ async function handleSmartFocus(targetText: string): Promise<unknown> {
       p = p.parentElement;
     }
     if (bestEl) break;
+
+    // NON-INTERACTIVE match: look for associated input in the same form group
+    // This handles placeholders, floating labels, and text labels near inputs
+    const container = el.closest('form, fieldset, div, section') || el.parentElement;
+    if (container) {
+      // Strategy 1: Input with matching placeholder
+      const inputByPlaceholder = container.querySelector('input[placeholder*="' + targetText.replace(/"/g, '&quot;') + '" i], textarea[placeholder*="' + targetText.replace(/"/g, '&quot;') + '" i]');
+      if (inputByPlaceholder && isElementVisible(inputByPlaceholder)) {
+        bestEl = inputByPlaceholder;
+        break;
+      }
+
+      // Strategy 2: Input with matching aria-label
+      const inputByAria = container.querySelector('input[aria-label*="' + targetText.replace(/"/g, '&quot;') + '" i], textarea[aria-label*="' + targetText.replace(/"/g, '&quot;') + '" i]');
+      if (inputByAria && isElementVisible(inputByAria)) {
+        bestEl = inputByAria;
+        break;
+      }
+
+      // Strategy 3: First visible input/textarea/select in the same container
+      const firstInput = container.querySelector('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea, select');
+      if (firstInput && isElementVisible(firstInput)) {
+        bestEl = firstInput;
+        break;
+      }
+    }
+
+    // Strategy 4: Check if there's a label with "for" attribute pointing to an input
+    const forId = el.getAttribute('for');
+    if (forId) {
+      const target = document.getElementById(forId);
+      if (target && isElementVisible(target)) {
+        bestEl = target;
+        break;
+      }
+    }
   }
 
   // Fallback to the first match
@@ -467,19 +559,21 @@ function isNavigationElement(el: Element): boolean {
 function handleFindElementByText(text: string, exact = false): Array<{elementRef: string, tag: string, text: string}> {
   const target = text.toLowerCase().trim();
   
-  const all = document.querySelectorAll('a, button, h1, h2, h3, h4, h5, h6, span, p, label, li, td, th, img, em, strong, div');
+  const all = document.querySelectorAll('a, button, h1, h2, h3, h4, h5, h6, span, p, label, li, td, th, img, em, strong, div, input, textarea, select');
   const matches: Element[] = [];
-  
+
   all.forEach(el => {
     const elText = (el as HTMLElement).innerText?.toLowerCase() || '';
     const elTitle = el.getAttribute('title')?.toLowerCase() || '';
     const elAlt = el.getAttribute('alt')?.toLowerCase() || '';
-    
+    const elPlaceholder = (el.getAttribute('placeholder') || (el as HTMLSelectElement).options?.[0]?.text || '').toLowerCase();
+    const elAriaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+
     let isMatch = false;
     if (exact) {
-      isMatch = elText === target || elTitle === target || elAlt === target;
+      isMatch = elText === target || elTitle === target || elAlt === target || elPlaceholder === target || elAriaLabel === target;
     } else {
-      isMatch = elText.includes(target) || elTitle.includes(target) || elAlt.includes(target);
+      isMatch = elText.includes(target) || elTitle.includes(target) || elAlt.includes(target) || elPlaceholder.includes(target) || elAriaLabel.includes(target);
     }
     
     if (isMatch && isElementVisible(el)) {

@@ -1,0 +1,27 @@
+name: Signup - All Fields With Optional
+description: Verify that filling all fields including optional phone and country submits successfully with "Submitted!" confirmation
+group: Signup/Pass
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - smart_fill:
+      target: Enter your full name
+      value: Nguyen Van A
+  - smart_fill:
+      target: Enter your email
+      value: nguyenvana@test.com
+  - smart_type:
+      target: Min 6 characters
+      text: secret123
+  - smart_fill:
+      target: "+84 xxx xxx xxx"
+      value: "+84 123 456 789"
+  - smart_fill:
+      target: Select country
+      value: Vietnam
+  - smart_check: I agree to the terms
+  - click:
+      selector: '#submit-btn'
+  - wait: 500
+  - expect:
+      visible: "Submitted"

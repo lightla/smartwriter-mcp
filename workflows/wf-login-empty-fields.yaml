@@ -1,0 +1,15 @@
+name: Login - Empty Fields
+description: Verify that submitting login with empty email/password shows validation error message
+group: Login/Fail
+stopOnFail: false
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - click:
+      selector: 'a[onclick*="login"]'
+  - wait: 500
+  - click:
+      selector: 'button[onclick*="handleLogin"]'
+  - wait: 500
+  - expect:
+      visible: "Please fill in"

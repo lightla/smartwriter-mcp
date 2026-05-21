@@ -1,0 +1,20 @@
+name: Login - Valid Credentials
+description: Verify that logging in with a registered email shows "Welcome back!" confirmation message
+group: Login/Pass
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - click:
+      selector: 'a[onclick*="login"]'
+  - wait: 500
+  - smart_fill:
+      target: you@example.com
+      value: admin@test.com
+  - smart_type:
+      target: Enter your password
+      text: password123
+  - click:
+      selector: 'button[onclick*="handleLogin"]'
+  - wait: 500
+  - expect:
+      visible: "Welcome back"

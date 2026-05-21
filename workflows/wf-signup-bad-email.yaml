@@ -1,0 +1,22 @@
+name: Signup - Invalid Email
+description: Verify that entering an invalid email format shows "Valid email is required" error and prevents form submission
+group: Signup/Fail
+stopOnFail: false
+steps:
+  - navigate: http://localhost:8888/test-validation.html
+  - wait: 1000
+  - smart_fill:
+      target: Enter your full name
+      value: Test User
+  - smart_fill:
+      target: Enter your email
+      value: not-an-email
+  - smart_type:
+      target: Min 6 characters
+      text: secret123
+  - smart_check: I agree to the terms
+  - click:
+      selector: '#submit-btn'
+  - expect:
+      visible: "Valid email"
+      not_visible: "Submitted"

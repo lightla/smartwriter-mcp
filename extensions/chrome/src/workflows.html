@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Smartwriter Workflows</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0f0e; overflow: hidden; }
+    iframe { width: 100vw; height: 100vh; border: none; }
+    .error { color: #e87c7c; padding: 40px; font-family: system-ui; text-align: center; }
+    .error h2 { margin-bottom: 12px; }
+    .error p { color: #8ba4a0; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const DASHBOARD_URL = 'http://localhost:8889/index.html';
+
+    fetch(DASHBOARD_URL, { mode: 'no-cors' })
+      .then(() => {
+        document.getElementById('root').innerHTML =
+          '<iframe src="' + DASHBOARD_URL + '"></iframe>';
+      })
+      .catch(() => {
+        document.getElementById('root').innerHTML =
+          '<div class="error"><h2>Dashboard not available</h2><p>Start the dashboard server:<br><code>python3 -m http.server 8889 --directory ~/.smartwriter/workflows</code></p></div>';
+      });
+  </script>
+</body>
+</html>

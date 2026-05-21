@@ -42,6 +42,12 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; c
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .workflow-list { display: flex; flex-direction: column; gap: 8px; }
 .workflow-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
+.workflow-item.selected { border-color: #2563eb; background: #0f172a; }
+.workflow-item .wf-check { width: 18px; height: 18px; accent-color: #2563eb; cursor: pointer; }
+.run-all-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; background: #0f172a; border-radius: 8px; border: 1px solid #1e293b; }
+.run-all-bar .select-all-label { font-size: 13px; color: #94a3b8; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.run-all-output { margin-top: 12px; background: #0f172a; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; display: none; }
+.run-all-output.active { display: block; }
 .workflow-item .wf-info { flex: 1; min-width: 0; }
 .workflow-item .wf-name { font-size: 14px; font-weight: 500; }
 .workflow-item .wf-desc { font-size: 12px; color: #64748b; }
@@ -100,9 +106,14 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; c
       <button class="btn btn-sm btn-success" onclick="newWorkflow()">New</button>
       <label class="btn btn-sm btn-secondary" style="cursor:pointer;">Upload <input type="file" accept=".yaml,.yml" onchange="uploadWorkflow(event)" style="display:none;"></label>
     </div>
+    <div class="run-all-bar">
+      <label class="select-all-label"><input type="checkbox" id="select-all-wf" onchange="toggleSelectAll(this.checked)"> Select All</label>
+      <button class="btn btn-sm btn-primary" onclick="runSelectedWorkflows()" id="run-selected-btn" disabled>Run Selected</button>
+    </div>
     <div id="workflow-list" class="workflow-list">
       <div style="color:#64748b;font-size:13px;">Loading...</div>
     </div>
+    <div class="run-all-output" id="run-all-output"></div>
   </div>
 
   <!-- Workflow Editor -->
@@ -208,17 +219,22 @@ async function launchSampleApp() {
   }
 }
 
+let allWorkflows = [];
+
 // Workflows
 async function refreshWorkflows() {
   try {
     const workflows = await api('/api/workflows');
     const list = document.getElementById('workflow-list');
+    allWorkflows = workflows || [];
     if (!workflows || workflows.length === 0) {
       list.innerHTML = '<div style="color:#64748b;font-size:13px;">No workflow files found. Create one or upload.</div>';
+      document.getElementById('run-selected-btn').disabled = true;
       return;
     }
     list.innerHTML = workflows.map(w => `
-      <div class="workflow-item">
+      <div class="workflow-item" data-wf-name="${escAttr(w.name)}">
+        <input type="checkbox" class="wf-check" data-wf-name="${escAttr(w.name)}" onchange="onWfCheckChange()">
         <div class="wf-info">
           <div class="wf-name">${escHtml(w.displayName)}</div>
           ${w.description ? '<div class="wf-desc">'+escHtml(w.description)+'</div>' : ''}
@@ -228,9 +244,74 @@ async function refreshWorkflows() {
         <button class="btn btn-sm btn-success" onclick="runWorkflow('${escAttr(w.name)}')">Run</button>
       </div>
     `).join('');
+    onWfCheckChange();
   } catch (e) {
     document.getElementById('workflow-list').innerHTML = '<div style="color:#ef4444;font-size:13px;">Failed to load workflows</div>';
   }
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.wf-check').forEach(cb => cb.checked = checked);
+  onWfCheckChange();
+}
+
+function onWfCheckChange() {
+  const checks = document.querySelectorAll('.wf-check');
+  const checked = [...checks].filter(cb => cb.checked);
+  document.getElementById('run-selected-btn').disabled = checked.length === 0;
+  document.getElementById('run-selected-btn').textContent = checked.length > 0 ? `Run Selected (${checked.length})` : 'Run Selected';
+  // Update select-all state
+  const selectAll = document.getElementById('select-all-wf');
+  if (selectAll) {
+    selectAll.checked = checks.length > 0 && checked.length === checks.length;
+    selectAll.indeterminate = checked.length > 0 && checked.length < checks.length;
+  }
+  // Highlight selected items
+  document.querySelectorAll('.workflow-item[data-wf-name]').forEach(item => {
+    const cb = item.querySelector('.wf-check');
+    item.classList.toggle('selected', cb && cb.checked);
+  });
+}
+
+async function runSelectedWorkflows() {
+  const checked = [...document.querySelectorAll('.wf-check:checked')];
+  if (checked.length === 0) return;
+  const output = document.getElementById('run-all-output');
+  output.className = 'run-all-output active';
+  output.innerHTML = '';
+  const btn = document.getElementById('run-selected-btn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  let totalPassed = 0, totalFailed = 0;
+  for (const cb of checked) {
+    const name = cb.dataset.wfName;
+    output.innerHTML += `<div style="color:#94a3b8;border-top:1px solid #334155;padding-top:8px;margin-top:8px;">▶ Running: ${escHtml(name)}</div>`;
+    try {
+      const result = await api('/api/run-workflow', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ name, sessionId: 'dash-' + Date.now() })
+      });
+      const r = result.result;
+      if (r) {
+        totalPassed += r.passed || 0;
+        totalFailed += r.failed || 0;
+        const statusIcon = r.failed > 0 ? '<span class="fail">✗ FAIL</span>' : '<span class="pass">✓ PASS</span>';
+        output.innerHTML += `<div>${statusIcon} ${escHtml(r.name)}: ${r.passed} passed, ${r.failed} failed</div>`;
+      } else {
+        output.innerHTML += `<div class="fail">Error: ${escHtml(result.error || 'Unknown')}</div>`;
+      }
+    } catch (e) {
+      output.innerHTML += `<div class="fail">Error: ${escHtml(e.message||String(e))}</div>`;
+    }
+    output.scrollTop = output.scrollHeight;
+  }
+  output.innerHTML += `<div style="border-top:1px solid #334155;padding-top:8px;margin-top:8px;color:#e2e8f0;font-weight:600;">Done. Total: ${totalPassed} passed, ${totalFailed} failed</div>`;
+  output.innerHTML += `<a href="/results" target="_blank" style="color:#38bdf8;">View Results Dashboard</a>`;
+  btn.disabled = false;
+  btn.textContent = `Run Selected (${checked.length})`;
+  onWfCheckChange();
+  try { await api('/api/rebuild', { method: 'POST' }); } catch {}
 }
 
 async function editWorkflow(name) {

@@ -1358,8 +1358,8 @@ async function main() {
     }
 
     let filePath: string;
-    if (urlPath === '/home' || urlPath === '/home/' || urlPath === '/home/index.html') {
-      // Serve dashboard home page
+    if (urlPath === '/' || urlPath === '/home' || urlPath === '/home/') {
+      // Serve dashboard home page at root
       const homePagePath = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'src', 'dashboard-home.html');
       if (existsSync(homePagePath)) {
         const data = readFileSync(homePagePath);
@@ -1370,7 +1370,7 @@ async function main() {
       res.writeHead(404);
       res.end('Home page not found');
       return;
-    } else if (urlPath === '/' || urlPath === '/index.html') {
+    } else if (urlPath === '/results' || urlPath === '/results/' || urlPath === '/results/index.html') {
       filePath = path.join(WORKFLOWS_DIR, 'index.html');
     } else if (urlPath.startsWith('/test/') || urlPath === '/test') {
       // Serve test/sample-app

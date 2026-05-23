@@ -1300,7 +1300,149 @@ async function main() {
       return;
     }
 
-    // API: Tabs (proxied from extension)
+    // API: Run workflow with SSE streaming (GET for EventSource)
+    if (req.method === 'GET' && urlPath === '/api/run-workflow-stream') {
+      const params = new URL(req.url || '/', 'http://localhost').searchParams;
+      const wfName = params.get('name');
+      const wfYaml = params.get('yaml');
+      const sessionId = params.get('sessionId') || 'dash-' + Date.now();
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders();
+      if (res.socket) res.socket.setNoDelay(true);
+
+      const send = (event: string, data: any) => {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        // Force flush buffered HTTP data to the kernel immediately
+        // Node.js may buffer small writes; _flush() pushes them out for real-time SSE
+        if (typeof (res as any)._flush === 'function') (res as any)._flush();
+      };
+
+      let resolvedPath: string | undefined;
+      let resolvedYaml: string | undefined;
+      if (wfName && !wfYaml) {
+        const projectWfDir = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'workflows');
+        for (const dir of [projectWfDir, WORKFLOWS_DIR]) {
+          const candidate = path.join(dir, wfName);
+          if (existsSync(candidate)) { resolvedPath = candidate; break; }
+        }
+      }
+      if (wfYaml) resolvedYaml = decodeURIComponent(wfYaml);
+
+      if (!resolvedPath && !resolvedYaml) {
+        send('error', { error: 'Provide name or yaml parameter' });
+        res.end();
+        return;
+      }
+
+      send('start', { name: wfName || 'workflow' });
+      // Yield to event loop so start event is flushed before workflow begins
+      await new Promise(r => setTimeout(r, 50));
+      try {
+        const result = await runWorkflow(
+          { path: resolvedPath, yaml: resolvedYaml, sessionId },
+          (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs),
+          (stepResult, stepIndex, totalSteps) => {
+            const mini = {
+              step: stepResult.step,
+              tool: stepResult.tool,
+              status: stepResult.status,
+              duration: stepResult.duration,
+              error: stepResult.error,
+              assertions: stepResult.assertions,
+            };
+            send('step', { step: mini, stepIndex, totalSteps });
+          }
+        );
+        send('done', {
+          result: {
+            ...result,
+            steps: result.steps.map(s => ({ ...s, screenshot: s.screenshotPath ? undefined : s.screenshot, logs: undefined, observations: undefined })),
+          }
+        });
+        try { execSync(`node "${path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs')}"`, { timeout: 10000 }); } catch {}
+      } catch (e) {
+        send('error', { error: e instanceof Error ? e.message : String(e) });
+      } finally {
+        try { res.end(); } catch {}
+      }
+      return;
+    }
+
+    // API: Run workflow with SSE streaming (POST for yaml content)
+    if (req.method === 'POST' && urlPath === '/api/run-workflow-stream') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        res.flushHeaders();
+        // Disable Nagle's algorithm so SSE events are sent immediately
+        if (res.socket) res.socket.setNoDelay(true);
+        const send = (event: string, data: any) => {
+          const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+          res.write(chunk);
+          // Force flush buffered HTTP data to the kernel immediately
+          if (typeof (res as any)._flush === 'function') (res as any)._flush();
+        };
+        try {
+          const { path: wfPath, yaml: wfYaml, sessionId, name: wfName } = JSON.parse(body);
+          let resolvedPath = wfPath;
+          let resolvedYaml = wfYaml;
+          if (wfName && !wfPath && !wfYaml) {
+            const projectWfDir = path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'workflows');
+            for (const dir of [projectWfDir, WORKFLOWS_DIR]) {
+              const candidate = path.join(dir, wfName);
+              if (existsSync(candidate)) { resolvedPath = candidate; break; }
+            }
+          }
+          if (!resolvedPath && !resolvedYaml) {
+            send('error', { error: 'Provide path, yaml, or name parameter' });
+            res.end();
+            return;
+          }
+          send('start', { name: wfName || 'workflow' });
+          // Yield to event loop so start event is flushed before workflow begins
+          await new Promise(r => setTimeout(r, 50));
+          const result = await runWorkflow(
+            { path: resolvedPath, yaml: resolvedYaml, sessionId },
+            (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs),
+            (stepResult, stepIndex, totalSteps) => {
+              // Send minimal step info for real-time display (no screenshot/logs bloat)
+              const mini = {
+                step: stepResult.step,
+                tool: stepResult.tool,
+                status: stepResult.status,
+                duration: stepResult.duration,
+                error: stepResult.error,
+                assertions: stepResult.assertions,
+              };
+              send('step', { step: mini, stepIndex, totalSteps });
+            }
+          );
+          send('done', {
+            result: {
+              ...result,
+              steps: result.steps.map(s => ({ ...s, screenshot: s.screenshotPath ? undefined : s.screenshot, logs: undefined, observations: undefined })),
+            }
+          });
+          try { execSync(`node "${path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs')}"`, { timeout: 10000 }); } catch {}
+        } catch (e) {
+          send('error', { error: e instanceof Error ? e.message : String(e) });
+        }
+        res.end();
+      });
+      return;
+    }
     if (req.method === 'GET' && urlPath === '/api/tabs') {
       try {
         const tabs = await sendToExtension('GET_TABS', {});

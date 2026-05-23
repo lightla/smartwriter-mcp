@@ -163,6 +163,8 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; c
     <div class="tab-bar">
       <button class="tab-btn active" data-tab="log" onclick="switchTab('log')">&#9654; Log</button>
       <button class="tab-btn" data-tab="editor" onclick="switchTab('editor')">&#9998; Editor</button>
+      <span style="flex:1;"></span>
+      <button class="tab-btn" onclick="clearLog()" style="color:#64748b;font-size:12px;" title="Clear log">&#128465;</button>
     </div>
     <div class="tab-content">
       <div class="tab-pane active" id="pane-log">
@@ -336,93 +338,86 @@ function clearLog() {
   el.innerHTML = '<div class="log-empty">Run a workflow to see output here</div>';
 }
 
-function appendLogEntry(name, result, error) {
-  const el = document.getElementById('log-content');
-  // Remove empty state
-  const empty = el.querySelector('.log-empty');
-  if (empty) empty.remove();
-
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-
-  if (error) {
-    entry.innerHTML = `<div class="log-entry-header"><span class="log-fail">✗</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-fail">FAILED</span></div>
-      <div class="log-step log-fail">${escHtml(error)}</div>`;
-  } else {
-    const r = result;
-    const statusIcon = r.failed > 0 ? '<span class="log-fail">✗</span>' : '<span class="log-pass">✓</span>';
-    const statusText = r.failed > 0 ? `<span class="log-fail">${r.failed} failed</span>` : '<span class="log-pass">all passed</span>';
-    const duration = (r.steps||[]).reduce((s,st) => s + (st.duration||0), 0);
-    let html = `<div class="log-entry-header">${statusIcon} <span class="log-wf-name">${escHtml(r.name||name)}</span> ${statusText} · ${r.passed}/${r.total} · ${duration}ms</div>`;
-    for (const step of (r.steps||[])) {
-      const cls = step.status === 'passed' ? 'log-pass' : 'log-fail';
-      const icon = step.status === 'passed' ? '✓' : '✗';
-      html += `<div class="log-step"><span class="${cls}">${icon}</span> Step ${step.step}: ${escHtml(step.tool)}`;
-      if (step.error) html += ` <span class="log-fail">(${escHtml(step.error)})</span>`;
-      // Show expect results
-      if (step.expectResults && step.expectResults.length) {
-        for (const er of step.expectResults) {
-          const ecls = er.passed ? 'log-pass' : 'log-fail';
-          const eicon = er.passed ? '✓' : '✗';
-          html += `<div class="log-step"><span class="${ecls}">${eicon}</span> ${escHtml(er.condition||er.detail||'')}`;
-          if (!er.passed && er.detail) html += ` — ${escHtml(er.detail)}`;
-          html += '</div>';
-        }
-      }
-      html += '</div>';
-    }
-    entry.innerHTML = html;
-  }
-  el.appendChild(entry);
-  el.scrollTop = el.scrollHeight;
-}
-
-function appendLogSummary(totalPassed, totalFailed, wfCount) {
-  const el = document.getElementById('log-content');
-  const div = document.createElement('div');
-  div.className = 'log-summary';
-  const icon = totalFailed > 0 ? '<span class="log-fail">✗</span>' : '<span class="log-pass">✓</span>';
-  div.innerHTML = `${icon} Done: ${wfCount} workflow${wfCount>1?'s':''}, ${totalPassed} passed, ${totalFailed} failed · <a href="/results" target="_blank" style="color:#38bdf8;">View Results</a>`;
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-}
-
 // --- Run ---
-async function runWorkflow(name) {
+// Step queue: ensures each step is rendered in its own animation frame
+// so they appear one by one even if SSE events arrive in a single chunk.
+function createStepRenderer(entry, el, name) {
+  const queue = [];
+  let processing = false;
+
+  function processNext() {
+    if (queue.length === 0) { processing = false; return; }
+    processing = true;
+    const { s, stepIndex, totalSteps } = queue.shift();
+    const cls = s.status === 'passed' ? 'log-pass' : 'log-fail';
+    const icon = s.status === 'passed' ? '✓' : '✗';
+    const stepLine = document.createElement('div');
+    stepLine.className = 'log-step';
+    stepLine.innerHTML = `<span class="${cls}">${icon}</span> Step ${s.step}: ${escHtml(s.tool)}${s.error ? ' <span class="log-fail">('+escHtml(s.error)+')</span>' : ''}`;
+    entry.appendChild(stepLine);
+    entry.querySelector('.log-entry-header').innerHTML = `<span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">${stepIndex + 1}/${totalSteps}</span>`;
+    el.scrollTop = el.scrollHeight;
+    // Small delay so the browser paints each step before the next
+    setTimeout(processNext, 60);
+  }
+
+  return function enqueueStep(s, stepIndex, totalSteps) {
+    queue.push({ s, stepIndex, totalSteps });
+    if (!processing) processNext();
+  };
+}
+
+function runWorkflow(name) {
+  return new Promise((resolve) => {
   switchTab('log');
   const el = document.getElementById('log-content');
   const empty = el.querySelector('.log-empty');
   if (empty) empty.remove();
 
-  // Show running indicator
-  const running = document.createElement('div');
-  running.className = 'log-entry';
-  running.innerHTML = `<div class="log-entry-header"><span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">running...</span></div>`;
-  el.appendChild(running);
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<div class="log-entry-header"><span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">running...</span></div>`;
+  el.appendChild(entry);
   el.scrollTop = el.scrollHeight;
 
-  try {
-    const result = await api('/api/run-workflow', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ name, sessionId: 'dash-' + Date.now() })
-    });
-    running.remove();
-    if (result.result) {
-      appendLogEntry(name, result.result, null);
+  const renderStep = createStepRenderer(entry, el, name);
+  const url = `${API}/api/run-workflow-stream?name=${encodeURIComponent(name)}&sessionId=dash-${Date.now()}`;
+  const es = new EventSource(url);
+  let wfResult = null;
+
+  es.addEventListener('step', (e) => {
+    const data = JSON.parse(e.data);
+    renderStep(data.step, data.stepIndex, data.totalSteps);
+  });
+
+  es.addEventListener('done', (e) => {
+    wfResult = JSON.parse(e.data).result;
+    es.close();
+    finalizeEntry();
+  });
+
+  es.addEventListener('error', () => {
+    es.close();
+    finalizeEntry();
+  });
+
+  function finalizeEntry() {
+    if (wfResult) {
+      const r = wfResult;
+      const statusIcon = r.failed > 0 ? '<span class="log-fail">✗</span>' : '<span class="log-pass">✓</span>';
+      const statusText = r.failed > 0 ? `<span class="log-fail">${r.failed} failed</span>` : '<span class="log-pass">all passed</span>';
+      const duration = (r.steps||[]).reduce((s,st) => s + (st.duration||0), 0);
+      entry.querySelector('.log-entry-header').innerHTML = `${statusIcon} <span class="log-wf-name">${escHtml(r.name||name)}</span> ${statusText} · ${r.passed}/${r.total} · ${duration}ms`;
+      showToast('Completed: ' + name, 'success');
     } else {
-      appendLogEntry(name, null, result.error || 'Unknown error');
+      showToast('Failed: ' + name, 'error');
     }
-    showToast('Completed: ' + name, 'success');
-    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
-  } catch (e) {
-    running.remove();
-    appendLogEntry(name, null, e.message || String(e));
-    showToast('Failed: ' + name, 'error');
+    resolve();
   }
+  });
 }
 
-async function runCurrentWorkflow() {
+function runCurrentWorkflow() {
   if (!currentFile) return;
   switchTab('log');
   const yamlContent = editor.getValue();
@@ -431,67 +426,58 @@ async function runCurrentWorkflow() {
   const empty = el.querySelector('.log-empty');
   if (empty) empty.remove();
 
-  const running = document.createElement('div');
-  running.className = 'log-entry';
-  running.innerHTML = `<div class="log-entry-header"><span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">running (editor)...</span></div>`;
-  el.appendChild(running);
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<div class="log-entry-header"><span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">running (editor)...</span></div>`;
+  el.appendChild(entry);
   el.scrollTop = el.scrollHeight;
 
-  try {
-    const result = await api('/api/run-workflow', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ yaml: yamlContent, sessionId: 'dash-' + Date.now() })
-    });
-    running.remove();
-    if (result.result) {
-      appendLogEntry(name, result.result, null);
+  const renderStep = createStepRenderer(entry, el, name);
+  const url = `${API}/api/run-workflow-stream?yaml=${encodeURIComponent(yamlContent)}&sessionId=dash-${Date.now()}`;
+  const es = new EventSource(url);
+  let wfResult = null;
+
+  es.addEventListener('step', (e) => {
+    const data = JSON.parse(e.data);
+    renderStep(data.step, data.stepIndex, data.totalSteps);
+  });
+
+  es.addEventListener('done', (e) => {
+    wfResult = JSON.parse(e.data).result;
+    es.close();
+    finalizeEntry();
+  });
+
+  es.addEventListener('error', () => {
+    es.close();
+    finalizeEntry();
+  });
+
+  function finalizeEntry() {
+    if (wfResult) {
+      const r = wfResult;
+      const statusIcon = r.failed > 0 ? '<span class="log-fail">✗</span>' : '<span class="log-pass">✓</span>';
+      const statusText = r.failed > 0 ? `<span class="log-fail">${r.failed} failed</span>` : '<span class="log-pass">all passed</span>';
+      const duration = (r.steps||[]).reduce((s,st) => s + (st.duration||0), 0);
+      entry.querySelector('.log-entry-header').innerHTML = `${statusIcon} <span class="log-wf-name">${escHtml(r.name||name)}</span> ${statusText} · ${r.passed}/${r.total} · ${duration}ms`;
+      showToast('Completed: ' + name, 'success');
     } else {
-      appendLogEntry(name, null, result.error || 'Unknown error');
+      showToast('Failed: ' + name, 'error');
     }
-    showToast('Completed: ' + name, 'success');
-    try { await api('/api/rebuild', { method: 'POST' }); } catch {}
-  } catch (e) {
-    running.remove();
-    appendLogEntry(name, null, e.message || String(e));
-    showToast('Failed: ' + name, 'error');
   }
 }
 
 async function runSelectedWorkflows() {
   const checked = [...document.querySelectorAll('.wf-check:checked')];
   if (checked.length === 0) return;
-  switchTab('log');
   const btn = document.getElementById('run-selected-btn');
   btn.disabled = true;
-  btn.textContent = 'Running...';
-  let totalPassed = 0, totalFailed = 0;
-  for (const cb of checked) {
-    const name = cb.dataset.wfName;
-    try {
-      const result = await api('/api/run-workflow', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name, sessionId: 'dash-' + Date.now() })
-      });
-      if (result.result) {
-        totalPassed += result.result.passed || 0;
-        totalFailed += result.result.failed || 0;
-        appendLogEntry(name, result.result, null);
-      } else {
-        totalFailed += 1;
-        appendLogEntry(name, null, result.error || 'Unknown error');
-      }
-    } catch (e) {
-      totalFailed += 1;
-      appendLogEntry(name, null, e.message || String(e));
-    }
+  for (let i = 0; i < checked.length; i++) {
+    btn.textContent = `${i+1}/${checked.length}`;
+    await runWorkflow(checked[i].dataset.wfName);
   }
-  appendLogSummary(totalPassed, totalFailed, checked.length);
   btn.disabled = false;
   onWfCheckChange();
-  showToast(`Batch done: ${totalPassed} passed, ${totalFailed} failed`, totalFailed > 0 ? 'error' : 'success');
-  try { await api('/api/rebuild', { method: 'POST' }); } catch {}
 }
 
 // --- Editor ---

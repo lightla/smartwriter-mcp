@@ -191,7 +191,8 @@ function saveManifest(dir: string, manifest: WorkflowManifest): void {
 
 export async function runWorkflow(
   yamlSource: { path?: string; yaml?: string },
-  sendToExtension: SendToExtension
+  sendToExtension: SendToExtension,
+  onStepComplete?: (stepResult: StepResult, stepIndex: number, totalSteps: number) => void
 ): Promise<WorkflowResult> {
   let yamlContent: string;
   if (yamlSource.path) {
@@ -265,6 +266,18 @@ export async function runWorkflow(
   const runDir = join(dir, `${slug}_${ts}`);
   mkdirSync(runDir, { recursive: true });
 
+  // Track last reported step index for streaming callback
+  let lastReportedIndex = -1;
+  const reportSteps = async () => {
+    if (!onStepComplete) return;
+    for (let j = lastReportedIndex + 1; j < results.length; j++) {
+      onStepComplete(results[j], j, steps.length);
+      // Yield to event loop so SSE events are flushed individually
+      await new Promise(r => setTimeout(r, 30));
+    }
+    lastReportedIndex = results.length - 1;
+  };
+
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const stepStart = Date.now();
@@ -304,6 +317,7 @@ export async function runWorkflow(
             });
             failed++;
             if (stopOnFail) break;
+            await reportSteps();
             continue;
           }
           const allPassed = !waitAssertions?.some(r => !r.passed);
@@ -313,6 +327,7 @@ export async function runWorkflow(
           results.push({ step: i + 1, tool: 'wait', args: step.args, status: 'passed', duration: ms, result: `waited ${ms}ms`, logs: stepLogs });
           passed++;
         }
+        await reportSteps();
         continue;
       }
 
@@ -352,6 +367,7 @@ export async function runWorkflow(
           failed++;
           if (stopOnFail) break;
         }
+        await reportSteps();
         continue;
       }
 
@@ -502,6 +518,9 @@ export async function runWorkflow(
     try {
       await sendToExtension('REMOVE_HIGHLIGHT', {});
     } catch { /* best-effort */ }
+
+    // Report all new steps for streaming
+    await reportSteps();
   }
 
   // Stop observation

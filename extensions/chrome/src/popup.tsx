@@ -766,9 +766,9 @@ function PopupApp() {
                 const isLoading = individualLoading === server.port;
                 const url = reportServerUrls[String(server.port)];
                 return (
-                  <div key={server.port} className={cn('flex items-center justify-between rounded-lg px-2 py-1', hasUrl ? 'bg-indigo-500/10' : 'bg-gray-800/50')}>
+                  <div key={server.port} className={cn('flex items-center justify-between rounded-lg px-2 py-1', hasUrl ? 'bg-indigo-500/10' : 'bg-[#c2d4d0]')}>
                     <div className="min-w-0 flex-1">
-                      <div className={cn('text-[10px] font-mono', hasUrl ? 'text-indigo-300' : theme.textMuted)}>
+                      <div className={cn('text-[10px] font-mono', hasUrl ? 'text-indigo-700' : 'text-[#263b3b]')}>
                         :{server.port}{url ? ` → ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : ''}
                       </div>
                     </div>

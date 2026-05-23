@@ -20,7 +20,11 @@
       "Bash(python3 *)",
       "Bash(nohup node /home/light/workspace/ai/smartwriter-mcp/dist/index.js)",
       "Bash(echo \"Started PID: $!\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "mcp__smartwriter__navigate",
+      "mcp__smartwriter__screenshot",
+      "Bash(rtk git *)",
+      "Bash(rtk ps *)"
     ]
   }
 }

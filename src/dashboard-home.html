@@ -358,7 +358,7 @@ function createStepRenderer(entry, el, name) {
     entry.querySelector('.log-entry-header').innerHTML = `<span class="log-info">⏳</span> <span class="log-wf-name">${escHtml(name)}</span> <span class="log-info">${stepIndex + 1}/${totalSteps}</span>`;
     el.scrollTop = el.scrollHeight;
     // Small delay so the browser paints each step before the next
-    setTimeout(processNext, 60);
+    setTimeout(processNext, 10);
   }
 
   return function enqueueStep(s, stepIndex, totalSteps) {

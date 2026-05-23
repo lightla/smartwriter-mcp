@@ -1,6 +1,6 @@
 import { readFileSync, mkdirSync, writeFileSync, readdirSync, existsSync, rmSync } from 'fs';
 import { resolve, join, dirname } from 'path';
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 import { homedir } from 'os';
@@ -273,7 +273,7 @@ export async function runWorkflow(
     for (let j = lastReportedIndex + 1; j < results.length; j++) {
       onStepComplete(results[j], j, steps.length);
       // Yield to event loop so SSE events are flushed individually
-      await new Promise(r => setTimeout(r, 30));
+      await new Promise(r => setTimeout(r, 5));
     }
     lastReportedIndex = results.length - 1;
   };
@@ -669,7 +669,11 @@ export function formatReport(result: WorkflowResult): string {
 function rebuildDashboard(): void {
   try {
     const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'rebuild-dashboard.mjs');
-    execSync(`node "${scriptPath}"`, { encoding: 'utf-8', timeout: 10000 });
+    exec(`node "${scriptPath}"`, (err) => {
+      if (err) {
+        console.error('[workflow] Failed to rebuild dashboard:', err.message);
+      }
+    });
   } catch (e) {
     console.error('[workflow] Failed to rebuild dashboard:', e instanceof Error ? e.message : String(e));
   }

@@ -6,7 +6,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import net from 'net';
-import { execSync, execFileSync, spawn, ChildProcess } from 'child_process';
+import { execSync, execFileSync, spawn, ChildProcess, exec } from 'child_process';
 import { realpathSync, existsSync, statSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -1342,7 +1342,7 @@ async function main() {
 
       send('start', { name: wfName || 'workflow' });
       // Yield to event loop so start event is flushed before workflow begins
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 10));
       try {
         const result = await runWorkflow(
           { path: resolvedPath, yaml: resolvedYaml, sessionId },
@@ -1365,7 +1365,7 @@ async function main() {
             steps: result.steps.map(s => ({ ...s, screenshot: s.screenshotPath ? undefined : s.screenshot, logs: undefined, observations: undefined })),
           }
         });
-        try { execSync(`node "${path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs')}"`, { timeout: 10000 }); } catch {}
+        try { exec(`node "${path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs')}"`); } catch {}
       } catch (e) {
         send('error', { error: e instanceof Error ? e.message : String(e) });
       } finally {
@@ -1412,7 +1412,7 @@ async function main() {
           }
           send('start', { name: wfName || 'workflow' });
           // Yield to event loop so start event is flushed before workflow begins
-          await new Promise(r => setTimeout(r, 50));
+          await new Promise(r => setTimeout(r, 10));
           const result = await runWorkflow(
             { path: resolvedPath, yaml: resolvedYaml, sessionId },
             (cmd, cmdArgs) => sendToExtension(cmd, cmdArgs),
@@ -1435,7 +1435,7 @@ async function main() {
               steps: result.steps.map(s => ({ ...s, screenshot: s.screenshotPath ? undefined : s.screenshot, logs: undefined, observations: undefined })),
             }
           });
-          try { execSync(`node "${path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs')}"`, { timeout: 10000 }); } catch {}
+          try { exec(`node "${path.join(path.dirname(realpathSync(new URL(import.meta.url).pathname)), '..', 'scripts', 'rebuild-dashboard.mjs')}"`); } catch {}
         } catch (e) {
           send('error', { error: e instanceof Error ? e.message : String(e) });
         }
